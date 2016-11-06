@@ -12,6 +12,9 @@ LABEL_NAME = "label"
 
 class Network :
 
+#internals
+############################################################################   
+
     def __init__(self, name) :
         self.network_name = name
         self.graph = tf.Graph()
@@ -58,28 +61,26 @@ class Network :
     def _get_input(self) :
         return self.layers[0][1]
 
-    def print_network(self) :
-        divide = '->'
-        output = "Network: {}\n".format(self.network_name)
-        for layer_group,name_group in zip(self.layers, self.names) :
-            for l,n in zip(layer_group, name_group) :
-                weight = ()
-                if (n in self.weights) :
-                    weight = self.weights[n].get_shape()
 
-                bias = ()
-                if (n in self.biases) :
-                    bias = self.biases[n].get_shape()
-                    
-                output += "{}: w{}, b{}, s{} {} ".format(n,
-                        weight,
-                        bias,
-                        [d.value for d in l.get_shape().dims], 
-                        divide)
+    def _use_cross_entropy(self) :
+        self.cost_function = tf.reduce_mean(-tf.reduce_sum(self._get_labels() * tf.log(self._get_previous_tensor() + 1e-10), reduction_indices=[1]))
 
-            output += '\n'
+    def _write_log(self, string, verbose=False) :
+        log = open(self.network_name + ".log", 'a')
+        log.write(string + '\n')
+        print(string) if verbose else None
+        log.close()
 
-        print(output[:-4])
+    def _write_seperation(self) :
+        div = "################################################################################"
+
+        self._write_log('\n')
+        self._write_log('\n')
+        self._write_log(div)
+        self._write_log('\n')
+
+#layer functions
+############################################################################
 
     def add_input_layer(self, data_shape, label_shape) :
         self._next_layer()
@@ -125,8 +126,8 @@ class Network :
             full = activation(tf.matmul(flat_input, weights) + biases)
             self._add(name, full)
 
-    def _use_cross_entropy(self) :
-        self.cost_function = tf.reduce_mean(-tf.reduce_sum(self._get_labels() * tf.log(self._get_previous_tensor() + 1e-10), reduction_indices=[1]))
+#runtime 
+############################################################################
 
     def finalize(self, learning_rate) :
         with self.graph.as_default(), self.graph.name_scope("final_setup") :
@@ -137,20 +138,28 @@ class Network :
             self.accuracy = tf.reduce_mean(tf.cast(self.check_prediction, tf.float32))
             self.initialize = tf.initialize_all_variables()
 
-    def _write_log(self, string, verbose=False) :
-        log = open(self.network_name + ".log", 'a')
-        log.write(string + '\n')
-        print(string) if verbose else None
-        log.close()
+    def print_network(self) :
+        divide = '->'
+        output = "Network: {}\n".format(self.network_name)
+        for layer_group,name_group in zip(self.layers, self.names) :
+            for l,n in zip(layer_group, name_group) :
+                weight = ()
+                if (n in self.weights) :
+                    weight = self.weights[n].get_shape()
 
-    def _write_seperation(self) :
-        div = "################################################################################"
+                bias = ()
+                if (n in self.biases) :
+                    bias = self.biases[n].get_shape()
+                    
+                output += "{}: w{}, b{}, s{} {} ".format(n,
+                        weight,
+                        bias,
+                        [d.value for d in l.get_shape().dims], 
+                        divide)
 
-        self._write_log('\n')
-        self._write_log('\n')
-        self._write_log(div)
-        self._write_log('\n')
+            output += '\n'
 
+        print(output[:-4])
 
     def run_network(self, epochs, batch_size, data, labels, test_data, test_labels, verbose=False) :
         iterations = math.ceil(data.shape[0] / batch_size)
@@ -195,6 +204,11 @@ class Network :
                                            })
 
             self._write_log("Epoch: {}; Acc: {}; Loss: {}".format(e + 1, current_accuracy, current_loss), verbose = verbose)
+            fdate = datetime.datetime.today()
+            self._write_log("Finish Date : {} ".format(fdate), verbose = verbose)
+            etime = fdate - date
+            self._write_log("Elapsed Time : {} days {} hours {} minutes ".format(etime.day, etime.hour, etime.minute))
+
 
 
 # def test() :
