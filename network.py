@@ -55,6 +55,15 @@ class Network :
 
         return result
 
+    def _get_previous_tensor_name(self) :
+        result = None
+
+        if (len(self.names[-1]) == 0) :
+            result = self.names[-2][-1]
+        else :
+            result = self.names[-1][-1]
+
+        return result
     def _get_labels(self) :
         return self.layers[0][0]
 
@@ -110,6 +119,7 @@ class Network :
             self._add(name, pool)
 
     def add_full_layer(self, depth, activation=tf.nn.relu) :
+        #TODO only reshape if necessary
         self._next_layer()
         name = self._gen_name(FULL_NAME)
         with self.graph.as_default(), self.graph.name_scope(name) :
@@ -161,6 +171,32 @@ class Network :
 
         print(output[:-4])
 
+    def _run_test(self, batch_size, test_data, test_labels, session) :
+        run_acc = 0
+        run_loss = 0
+
+        input_holder = self._get_input()
+        label_holder = self._get_labels()
+
+        iterations = math.ceil(test_data.shape[0] / batch_size)
+
+        for i in range(iterations) :
+            batch_start = (i * batch_size)
+            batch_end = batch_start + batch_size
+            if (batch_end > test_data.shape[0]) :
+                batch_end = test_data.shape[0]
+
+            current_accuracy, current_loss = session.run([self.accuracy, self.cost_function],
+                                           feed_dict = {
+                                               input_holder:test_data[batch_start:batch_end],
+                                               label_holder:test_labels[batch_start:batch_end],
+                                               })
+            run_acc += (current_accuracy  * (batch_end - batch_start))
+            run_loss += (current_loss  * (batch_end - batch_start))
+
+        return ((run_acc / test_data.shape[0]), (run_loss / test_data.shape[0]))
+    
+    #TODO  vairable test batch size here 
     def run_network(self, epochs, batch_size, data, labels, test_data, test_labels, verbose=False) :
         iterations = math.ceil(data.shape[0] / batch_size)
         session = tf.Session(graph=self.graph)
@@ -185,50 +221,27 @@ class Network :
                     batch_end = data.shape[0]
                     self._write_log("WARNING: clipping batch", verbose=verbose)
 
+
+                if (i % 100 == 0) :
+                    acc = session.run(self.accuracy, 
+                            feed_dict={
+                                input_holder:data[batch_start:batch_end],
+                                label_holder:labels[batch_start:batch_end],
+                                })
+                    #print("iter: {} acc: {}".format(i, acc))
+
                 session.run(self.train_step, 
                             feed_dict={
                                 input_holder:data[batch_start:batch_end],
                                 label_holder:labels[batch_start:batch_end],
                                 })
 
-            current_accuracy = session.run(self.accuracy,
-                                           feed_dict = {
-                                               input_holder:test_data,
-                                               label_holder:test_labels,
-                                               })
-
-            current_loss = session.run(self.cost_function,
-                                       feed_dict = {
-                                           input_holder:test_data,
-                                           label_holder:test_labels,
-                                           })
+            current_accuracy, current_loss = self._run_test(batch_size, test_data, test_labels, session)
 
             self._write_log("Epoch: {}; Acc: {}; Loss: {}".format(e + 1, current_accuracy, current_loss), verbose = verbose)
-            fdate = datetime.datetime.today()
-            self._write_log("Finish Date : {} ".format(fdate), verbose = verbose)
-            etime = fdate - date
-            self._write_log("Elapsed Time : {} days {} hours {} minutes ".format(etime.day, etime.hour, etime.minute))
 
-
-
-# def test() :
-    # network = Network()
-    # network.add_input_layer([None,28,28,1], [None, 10])
-    # network.add_conv_layer(5, 32)
-    # network.add_max_pool(2,2)
-    # network.add_conv_layer(5, 64)
-    # network.add_max_pool(2,2)
-    # network.add_full_layer(1024)
-    # network.add_full_layer(10, activation=tf.nn.softmax)
- 
-    # network.print_network()
-
-    # network.finalize(0.5)
-
-    # import tflearn.datasets.mnist as mnist
-    # data, labels, test_data, test_labels = mnist.load_data(one_hot=True)
-    # data = data.reshape([-1,28,28,1])
-    # test_data = test_data.reshape([-1,28,28,1])
-
-    # network.run_network(10, 50, data, labels, test_data, test_labels)
+        fdate = datetime.datetime.today()
+        self._write_log("Finish Date : {} ".format(fdate), verbose = verbose)
+        etime = fdate - date
+        self._write_log("Elapsed Time : {} days {} hours {} minutes ".format(etime.days, etime.seconds // (60**2), (etime.seconds % (60**2)) // 60), verbose=verbose)
 
