@@ -10,6 +10,14 @@ FULL_NAME = "fc"
 INPUT_NAME = "input"
 LABEL_NAME = "label"
 
+class LayerInfo :
+
+    def __init__(self, name, shape_weights, shape_biases, shape_output) :
+        self.name = name
+        self.weight_shape = shape_weights
+        self.bias_shape = shape_biases
+        self.output_shape = shape_output
+
 class Network :
 
 #internals
@@ -88,6 +96,53 @@ class Network :
         self._write_log(div)
         self._write_log('\n')
 
+
+#Visualization functions
+############################################################################
+
+    def get_info(self) :
+        result = []
+        for layer_group,name_group in zip(self.layers, self.names) :
+            result.append([])
+            for l,n in zip(layer_group, name_group) :
+                weight = ()
+                if (n in self.weights) :
+                    weight = self.weights[n].get_shape()
+
+                bias = ()
+                if (n in self.biases) :
+                    bias = self.biases[n].get_shape()
+
+                out_shape = [d.value for d in l.get_shape().dims]
+
+                result[-1].append(LayerInfo(n, weight, bias, out_shape))
+
+        return result
+                    
+
+    def print_network(self) :
+        divide = '->'
+        output = "Network: {}\n".format(self.network_name)
+        for layer_group,name_group in zip(self.layers, self.names) :
+            for l,n in zip(layer_group, name_group) :
+                weight = ()
+                if (n in self.weights) :
+                    weight = self.weights[n].get_shape()
+
+                bias = ()
+                if (n in self.biases) :
+                    bias = self.biases[n].get_shape()
+                    
+                output += "{}: w{}, b{}, s{} {} ".format(n,
+                        weight,
+                        bias,
+                        [d.value for d in l.get_shape().dims], 
+                        divide)
+
+            output += '\n'
+
+        print(output[:-4])
+
 #layer functions
 ############################################################################
 
@@ -148,28 +203,6 @@ class Network :
             self.accuracy = tf.reduce_mean(tf.cast(self.check_prediction, tf.float32))
             self.initialize = tf.initialize_all_variables()
 
-    def print_network(self) :
-        divide = '->'
-        output = "Network: {}\n".format(self.network_name)
-        for layer_group,name_group in zip(self.layers, self.names) :
-            for l,n in zip(layer_group, name_group) :
-                weight = ()
-                if (n in self.weights) :
-                    weight = self.weights[n].get_shape()
-
-                bias = ()
-                if (n in self.biases) :
-                    bias = self.biases[n].get_shape()
-                    
-                output += "{}: w{}, b{}, s{} {} ".format(n,
-                        weight,
-                        bias,
-                        [d.value for d in l.get_shape().dims], 
-                        divide)
-
-            output += '\n'
-
-        print(output[:-4])
 
     def _run_test(self, batch_size, test_data, test_labels, session) :
         run_acc = 0
