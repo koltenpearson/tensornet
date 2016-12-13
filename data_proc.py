@@ -2,6 +2,7 @@
 
 import numpy as np
 import idx2numpy
+import h5py
 import os
 
 def get_category_map(source) :
@@ -30,7 +31,7 @@ def to_one_hot(source, cat_map) :
 
 
 def get_mnist() :
-    ROOT = "mnist"
+    ROOT = "tensornet/mnist"
     train_images = os.path.join(ROOT, "train-images.idx")
     train_labels = os.path.join(ROOT, "train-labels.idx")
     test_images = os.path.join(ROOT, "test-images.idx")
@@ -57,3 +58,12 @@ def validate_mnist() :
         print(j)
         pp.imshow(i.reshape([28,28]), cmap='Greys')
         pp.show()
+
+def make_mnist_h5py(loc) :
+    dat = h5py.File(loc, 'w')
+    train_image, train_label, test_image, test_label = get_mnist()
+
+    out_train_image = dat.create_dataset('train_image', data=train_image, dtype=np.float16)
+    out_train_label = dat.create_dataset('train_label',  data=train_label, dtype=np.float16)
+    out_test_image = dat.create_dataset('test_image', data=test_image, dtype=np.float16)
+    out_test_label = dat.create_dataset('test_label', data=test_label, dtype=np.float16)

@@ -18,6 +18,130 @@ class LayerInfo :
         self.bias_shape = shape_biases
         self.output_shape = shape_output
 
+class Run :
+
+    def __init__(self, network, run_label="") :
+        self.run_label = run_label
+        if not network.finalized :
+            network.finalize()
+        self.network = network
+
+        self.learning_rate = None
+        self.batch_size = None
+        self.testing_batch_size = None
+        self.logging = False
+
+
+    def _feed_dict(self, data, labels, train=True) :
+        input_holder = self.network.get_input()
+        label_holder = self.network.get_labels()
+
+        batch_size = self.testing_batch_size
+        if(train) :
+            batch_size = self.batch_size
+
+        iterations = math.ceil(data.shape[0] / batch_size)
+        for i in range(iterations) :
+            batch_start = (i * batch_size)
+            batch_end = batch_start + batch_size
+            lr_ratio = 1
+
+            if (batch_end > data.shape[0]) :
+                batch_end = data.shape[0]
+                lr_ratio = (batch_end - batch_start) / batch_size
+
+            result = {
+                        input_holder:data[batch_start:batch_end],
+                        label_holder:labels[batch_start:batch_end],
+                     }
+
+            if(train) :
+                result[self.network.learning_rate] = self.learning_rate * lr_ratio
+
+            yield result
+
+    def _get_runid(self) :
+        return "{}lr{}bs{}".format(self.run_label, self.learning_rate, self.batch_size)
+
+    #TODO make clear that enable logging must be ran after hyperparameters are set
+    def enable_logging(self, log_dir) :
+        self.network.enable_tensorboard()
+        self.train_writer = tf.train.SummaryWriter(log_dir + "/" + self.network.network_name + "/" + self._get_runid() + "/train", self.network.graph)
+        self.test_writer = tf.train.SummaryWriter(log_dir + "/" + self.network.network_name + "/" + self._get_runid() + "/test")
+        self.logging = True
+
+    def _initialize(self) :
+        self.session = tf.Session(graph=self.network.graph)
+        self.session.run(self.network.initialize)
+        if self.testing_batch_size == None :
+            self.testing_batch_size = self.batch_size
+
+    def _run_test(self, test_data, test_labels) :
+        run_acc = 0
+        run_loss = 0
+
+        for i, feed_dict in enumerate(self._feed_dict(test_data, test_labels, train=False)) :
+
+            current_loss, current_accuracy = self.session.run([self.network.cost_function, self.network.accuracy], feed_dict=feed_dict)
+
+            batch_start = (i * self.testing_batch_size) #TODO this code is repeated from _feed_dict, any way around that?
+            batch_end = batch_start + self.testing_batch_size
+            if (batch_end > test_data.shape[0]) :
+                batch_end = test_data.shape[0]
+
+            run_acc += (current_accuracy  * (batch_end - batch_start))
+            run_loss += (current_loss  * (batch_end - batch_start))
+
+        return ((run_acc / test_data.shape[0]), (run_loss / test_data.shape[0]))
+    
+
+    def run(self, epochs, train_data, train_labels, test_data, test_labels, verbose=False) :
+        self._initialize()
+
+        # TODO eventually incorporate all this metadata somehow . . .
+        # self._write_seperation()
+        # message = "STARTING RUN epochs: {} batch_size: {} ({} iterations per epoch) learning_rate: {}".format(epochs, batch_size, iterations, self.learning_rate)
+        # date = datetime.datetime.today()
+        # message += "\ndate:{}".format(str(date))
+        # self._write_log(message, verbose=verbose)
+
+        iter_sum = 0
+        for e in range(epochs) :
+
+            if (verbose) :
+                print("starting run")
+
+
+            for feed_dict in self._feed_dict(train_data, train_labels) :
+                iter_sum += 1
+
+                if (self.logging and (iter_sum % 10 == 0)) :
+                    _, summary =self. session.run([self.network.train_step, self.network.summaries], feed_dict=feed_dict)
+                    self.train_writer.add_summary(summary, iter_sum)
+                else :
+                    self.session.run([self.network.train_step, self.network.accuracy], feed_dict=feed_dict)
+
+            current_accuracy, current_loss = self._run_test(test_data, test_labels)
+            if verbose :
+                print("Epoch: {}; Acc: {}; Loss: {}".format(e + 1, current_accuracy, current_loss))
+
+            if self.logging :
+                test_summ = tf.Summary(value=[
+                                              tf.Summary.Value(tag="accuracy", simple_value=current_accuracy),
+                                              tf.Summary.Value(tag="loss", simple_value=current_loss)
+                                             ])
+                self.test_writer.add_summary(test_summ, iter_sum)
+
+
+        if(self.logging) : 
+            self.test_writer.close()
+            self.train_writer.close()
+
+        # fdate = datetime.datetime.today()
+        # self._write_log("Finish Date : {} ".format(fdate), verbose = verbose)
+        # etime = fdate - date
+        # self._write_log("Elapsed Time : {} days {} hours {} minutes ".format(etime.days, etime.seconds // (60**2), (etime.seconds % (60**2)) // 60), verbose=verbose)
+
 class Network :
 
 #internals
@@ -30,6 +154,8 @@ class Network :
         self.names = []
         self.weights = {}
         self.biases = {}
+        self.tboard = False
+        self.finalized = False
 
     def _next_layer(self) :
         self.layers.append([])
@@ -72,32 +198,18 @@ class Network :
             result = self.names[-1][-1]
 
         return result
-    def _get_labels(self) :
+
+    def get_labels(self) :
         return self.layers[0][0]
 
-    def _get_input(self) :
+    def get_input(self) :
         return self.layers[0][1]
 
-
     def _use_cross_entropy(self) :
-        self.cost_function = tf.reduce_mean(-tf.reduce_sum(self._get_labels() * tf.log(self._get_previous_tensor() + 1e-10), reduction_indices=[1]))
-
-    def _write_log(self, string, verbose=False) :
-        log = open(self.network_name + ".log", 'a')
-        log.write(string + '\n')
-        print(string) if verbose else None
-        log.close()
-
-    def _write_seperation(self) :
-        div = "################################################################################"
-
-        self._write_log('\n')
-        self._write_log('\n')
-        self._write_log(div)
-        self._write_log('\n')
+        self.cost_function = tf.reduce_mean(-tf.reduce_sum(self.get_labels() * tf.log(self._get_previous_tensor() + 1e-10), reduction_indices=[1]))
 
 
-#Visualization functions
+#visualization/log functions
 ############################################################################
 
     def get_info(self) :
@@ -141,7 +253,7 @@ class Network :
 
             output += '\n'
 
-        print(output[:-4])
+        return output[:-4]
 
 #layer functions
 ############################################################################
@@ -191,90 +303,23 @@ class Network :
             full = activation(tf.matmul(flat_input, weights) + biases)
             self._add(name, full)
 
-#runtime 
+#tensorboard
 ############################################################################
+    def enable_tensorboard(self) :
+        self.tboard = True
+        with self.graph.as_default() :
+            tf.summary.scalar("loss", self.cost_function)
+            tf.summary.scalar("accuracy", self.accuracy)
+            self.summaries = tf.merge_all_summaries()
 
-    def finalize(self, learning_rate) :
-        with self.graph.as_default(), self.graph.name_scope("final_setup") :
+    def finalize(self) :
+        with self.graph.as_default() :
             self._use_cross_entropy()
-            self.train_step = tf.train.GradientDescentOptimizer(learning_rate).minimize(self.cost_function)
-            self.learning_rate = learning_rate #keep for logging purposes
-            self.check_prediction = tf.equal(tf.argmax(self._get_previous_tensor(), 1), tf.argmax(self._get_labels(), 1))
+            self.learning_rate = tf.placeholder(tf.float32, shape=[])
+            self.train_step = tf.train.GradientDescentOptimizer(self.learning_rate).minimize(self.cost_function)
+            self.check_prediction = tf.equal(tf.argmax(self._get_previous_tensor(), 1), tf.argmax(self.get_labels(), 1))
             self.accuracy = tf.reduce_mean(tf.cast(self.check_prediction, tf.float32))
             self.initialize = tf.initialize_all_variables()
+            self.finalized = True
 
-
-    def _run_test(self, batch_size, test_data, test_labels, session) :
-        run_acc = 0
-        run_loss = 0
-
-        input_holder = self._get_input()
-        label_holder = self._get_labels()
-
-        iterations = math.ceil(test_data.shape[0] / batch_size)
-
-        for i in range(iterations) :
-            batch_start = (i * batch_size)
-            batch_end = batch_start + batch_size
-            if (batch_end > test_data.shape[0]) :
-                batch_end = test_data.shape[0]
-
-            current_accuracy, current_loss = session.run([self.accuracy, self.cost_function],
-                                           feed_dict = {
-                                               input_holder:test_data[batch_start:batch_end],
-                                               label_holder:test_labels[batch_start:batch_end],
-                                               })
-            run_acc += (current_accuracy  * (batch_end - batch_start))
-            run_loss += (current_loss  * (batch_end - batch_start))
-
-        return ((run_acc / test_data.shape[0]), (run_loss / test_data.shape[0]))
-    
-    #TODO  vairable test batch size here 
-    def run_network(self, epochs, batch_size, data, labels, test_data, test_labels, verbose=False) :
-        iterations = math.ceil(data.shape[0] / batch_size)
-        session = tf.Session(graph=self.graph)
-        session.run(self.initialize)
-
-        self._write_seperation()
-        message = "STARTING RUN epochs: {} batch_size: {} ({} iterations per epoch) learning_rate: {}".format(epochs, batch_size, iterations, self.learning_rate)
-        date = datetime.datetime.today()
-        message += "\ndate:{}".format(str(date))
-        self._write_log(message, verbose=verbose)
-
-        input_holder = self._get_input()
-        label_holder = self._get_labels()
-
-        for e in range(epochs) :
-
-            for i in range(iterations) :
-
-                batch_start = (i * batch_size) 
-                batch_end = batch_start + batch_size
-                if (batch_end > data.shape[0]) :
-                    batch_end = data.shape[0]
-                    self._write_log("WARNING: clipping batch", verbose=verbose)
-
-
-                if (i % 100 == 0) :
-                    acc = session.run(self.accuracy, 
-                            feed_dict={
-                                input_holder:data[batch_start:batch_end],
-                                label_holder:labels[batch_start:batch_end],
-                                })
-                    #print("iter: {} acc: {}".format(i, acc))
-
-                session.run(self.train_step, 
-                            feed_dict={
-                                input_holder:data[batch_start:batch_end],
-                                label_holder:labels[batch_start:batch_end],
-                                })
-
-            current_accuracy, current_loss = self._run_test(batch_size, test_data, test_labels, session)
-
-            self._write_log("Epoch: {}; Acc: {}; Loss: {}".format(e + 1, current_accuracy, current_loss), verbose = verbose)
-
-        fdate = datetime.datetime.today()
-        self._write_log("Finish Date : {} ".format(fdate), verbose = verbose)
-        etime = fdate - date
-        self._write_log("Elapsed Time : {} days {} hours {} minutes ".format(etime.days, etime.seconds // (60**2), (etime.seconds % (60**2)) // 60), verbose=verbose)
 
