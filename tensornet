@@ -1,0 +1,153 @@
+#! /bin/env python
+
+import h5py
+import sys
+import os
+import json
+import importlib.util as iutil
+
+PACKAGE_PATH = os.path.dirname(os.path.realpath(__file__))
+BOOTSTAP_FILE = os.path.join(PACKAGE_PATH, "bootstrap.json")
+
+sys.path.append(os.path.dirname(PACKAGE_PATH))
+from tensornet import Network, Run
+
+NETWORK_DIR = "network"
+LOG_DIR = "log"
+RUN_DIR = "run"
+DATASET_DIR = "dataset"
+
+
+
+help_message ="""script to mangage neural networks
+
+    tensornet init {filepath}
+        initalizes a new home for tensornet, and sets tensornet to use 
+        the filepath internally
+
+    tensornet set {filepath}
+        points tensornet to point to the given filepath internally
+
+    tensornet run {network name} {dataset name} {run tag} {epochs} {learning rate} {batch size}
+        runs a network with the given hyperparameters
+        {network name} - the name of the network as stated in the network_name variable
+        {dataset name} - the h5py file in dataset directory without the extenstion
+                            is expecting to have a "train_image", "train_label", 
+                            "test_image", and "test_label" as top level keys, and
+                            the labels should be one-hot vectors already
+        {run tag} - the logs and saved checkpoints will be tagged with this run tag
+        {epochs} - how many passes to make through the training set
+        {learning rate} - the learning rate
+        {batch size} - the training batch size
+"""
+
+def set_root_dir(path) :
+    json.dump({"rootdir" : os.path.abspath(path)}, open(BOOTSTAP_FILE, 'w'))
+
+def get_root_dir() :
+    try :
+        bootstrap = json.load(open(BOOTSTAP_FILE))
+    except OSError :
+        print("ERROR: must run init at least once")
+
+    return bootstrap["rootdir"]
+
+def create_dirs(root) :
+    print("creating new tensornet directory at {}".format(root))
+    os.makedirs(os.path.join(root, NETWORK_DIR), exist_ok=True)
+    os.makedirs(os.path.join(root, LOG_DIR), exist_ok=True)
+    os.makedirs(os.path.join(root, RUN_DIR), exist_ok=True)
+    os.makedirs(os.path.join(root, DATASET_DIR), exist_ok=True)
+    set_root_dir(root)
+
+def get_networks() :
+    try :
+        result = []
+        root_dir = get_root_dir()
+        filenames = os.listdir(os.path.join(root_dir, NETWORK_DIR))
+
+        for i,f in enumerate(filenames) :
+            filepath = os.path.join(root_dir, NETWORK_DIR, f)
+            if (os.path.isfile(filepath)) :
+                spec = iutil.spec_from_file_location("loaded_network_" + str(i), filepath)
+                mod = iutil.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                result.append(mod)
+
+        return result
+    except :
+        print("ERROR: problem loading networks (non python files in the network directory?)")
+
+
+def find_network(name, networks) :
+    for n in networks :
+        if name == n.network_name :
+            return n
+
+    print ("ERROR: network {} not found".format(name))
+    return None
+
+def get_datasets() :
+    result = {}
+    root_dir = get_root_dir()
+    filenames = os.listdir(os.path.join(root_dir, DATASET_DIR))
+
+    for f in filenames :
+        name = f.split(".")[0]
+        filepath = os.path.join(root_dir, DATASET_DIR, f)
+        result[name] = filepath
+    return result
+
+def find_dataset(name, datasets) :
+    if name in datasets :
+        return datasets[name]
+    else :
+        print("ERROR: dataset not found with name {}".format(name))
+        return None
+
+def extract_data(dataset) :
+    dat = h5py.File(dataset, 'r')
+    return (dat['train_image'], dat['train_label'], dat['test_image'], dat['test_label'])
+
+def run_network(network, dataset, run_tag, epochs, learning_rate, batch_size) :
+    root_dir = get_root_dir()
+    net = network.create_network()
+    run = Run(net, run_label=run_tag)
+    run.learning_rate = learning_rate
+    run.batch_size = batch_size
+    run.enable_logging(os.path.join(root_dir, LOG_DIR))
+
+    print("extracting data")
+    train_image, train_label, test_image, test_label = extract_data(dataset)
+    run.run(epochs, train_image, train_label, test_image, test_label, verbose=True)
+
+def main() :
+    args = sys.argv[1:]
+
+    if len(args) == 0 :
+        print(help_message)
+        return
+
+    if args[0] == "init" :
+        create_dirs(args[1])
+
+    elif args[0] == "set" : #TODO check if valid
+        print("setting tensornet to run from {}".format(args[1]))
+        set_root_dir(args[1])
+
+    elif args[0] == "run" : #tensornet run {network name} {dataset name} {run tag} {epochs} {learning rate} {batch size}
+        net = find_network(args[1], get_networks())
+        if (net is None) :
+            return
+
+        dataset = find_dataset(args[2], get_datasets())
+        if (dataset is None) :
+            return
+
+        run_network(net, dataset, args[3], int(args[4]), float(args[5]), int(args[6]))
+
+    else :
+        print(help_message)
+
+if (__name__) == ("__main__") :
+    main()
