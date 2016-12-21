@@ -5,6 +5,7 @@ import sys
 import os
 import json
 import importlib.util as iutil
+import random
 
 PACKAGE_PATH = os.path.dirname(os.path.realpath(__file__))
 BOOTSTAP_FILE = os.path.join(PACKAGE_PATH, "bootstrap.json")
@@ -116,10 +117,26 @@ def run_network(network, dataset, run_tag, epochs, learning_rate, batch_size) :
     run.learning_rate = learning_rate
     run.batch_size = batch_size
     run.enable_logging(os.path.join(root_dir, LOG_DIR))
+    run.enable_saving(os.path.join(root_dir, RUN_DIR))
+    run.restore_if_possible()
 
     print("extracting data")
     train_image, train_label, test_image, test_label = extract_data(dataset)
     run.run(epochs, train_image, train_label, test_image, test_label, verbose=True)
+
+def generate_runid() :
+    vowels = ['a', 'e', 'i', 'o', 'u']
+    consonants = ['b', 'd', 'k', 'f', 'h', 'j', 'k', 'l' 'm', 'n', 'p', 'r', 's', 't', 'v', 'w', 'x', 'z', 'st', 'ch', 'sh'] 
+    lengths = [1, 2, 3]
+
+    l = random.choice(lengths) 
+    result = random.choice(consonants)
+    for i in range(l) :
+        result += random.choice(vowels)
+        result += random.choice(consonants)
+
+    return result
+    
 
 def main() :
     args = sys.argv[1:]
@@ -145,6 +162,9 @@ def main() :
             return
 
         run_network(net, dataset, args[3], int(args[4]), float(args[5]), int(args[6]))
+
+    elif args[0] == "random" :
+        print(generate_runid())
 
     else :
         print(help_message)
