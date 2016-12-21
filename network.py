@@ -93,8 +93,8 @@ class Run :
     #TODO make clear that enable logging must be ran after hyperparameters are set
     def enable_logging(self, log_dir) :
         self.network.enable_tensorboard()
-        self.train_writer = tf.train.SummaryWriter(log_dir + "/" + self.network.network_name + "/" + self._get_runid() + "/train", self.network.graph)
-        self.test_writer = tf.train.SummaryWriter(log_dir + "/" + self.network.network_name + "/" + self._get_runid() + "/test")
+        self.train_writer = tf.summary.FileWriter(log_dir + "/" + self.network.network_name + "/" + self._get_runid() + "/train", self.network.graph)
+        self.test_writer = tf.summary.FileWriter(log_dir + "/" + self.network.network_name + "/" + self._get_runid() + "/test")
         self.log_dir = log_dir
         self.logging = True
 
@@ -376,7 +376,7 @@ class Network :
         with self.graph.as_default() :
             tf.summary.scalar("loss", self.cost_function)
             tf.summary.scalar("accuracy", self.accuracy)
-            self.summaries = tf.merge_all_summaries()
+            self.summaries = tf.summary.merge_all()
 
     def enable_saving(self, max_to_keep, keep_n_hours) :
         with self.graph.as_default() :

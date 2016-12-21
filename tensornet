@@ -62,7 +62,7 @@ def create_dirs(root) :
     set_root_dir(root)
 
 def get_networks() :
-    try :
+    # try :
         result = []
         root_dir = get_root_dir()
         filenames = os.listdir(os.path.join(root_dir, NETWORK_DIR))
@@ -76,8 +76,8 @@ def get_networks() :
                 result.append(mod)
 
         return result
-    except :
-        print("ERROR: problem loading networks (non python files in the network directory?)")
+    # except :
+        # print("ERROR: problem loading networks (non python files in the network directory?)")
 
 
 def find_network(name, networks) :
