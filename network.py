@@ -387,6 +387,7 @@ class Network :
             self._use_cross_entropy()
             self.learning_rate = tf.placeholder(tf.float32, shape=[])
             self.train_step = tf.train.GradientDescentOptimizer(self.learning_rate).minimize(self.cost_function)
+            self.prediction = tf.argmax(self._get_previous_tensor(), 1)
             self.check_prediction = tf.equal(tf.argmax(self._get_previous_tensor(), 1), tf.argmax(self.get_labels(), 1))
             self.accuracy = tf.reduce_mean(tf.cast(self.check_prediction, tf.float32))
             self.initialize = tf.global_variables_initializer()

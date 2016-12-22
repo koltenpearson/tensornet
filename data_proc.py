@@ -31,7 +31,7 @@ def to_one_hot(source, cat_map) :
 
 
 def get_mnist() :
-    ROOT = "tensornet/mnist"
+    ROOT = "mnist"
     train_images = os.path.join(ROOT, "train-images.idx")
     train_labels = os.path.join(ROOT, "train-labels.idx")
     test_images = os.path.join(ROOT, "test-images.idx")

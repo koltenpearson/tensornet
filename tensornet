@@ -1,4 +1,4 @@
-#! /bin/env python
+#! /usr/bin/env python
 
 import h5py
 import sys
@@ -40,6 +40,13 @@ help_message ="""script to mangage neural networks
         {epochs} - how many passes to make through the training set
         {learning rate} - the learning rate
         {batch size} - the training batch size
+
+    tensornet listen {server} {port} {network} {checkpoint}
+        runs a server to listen to feedforward requests at the specificied server and port
+        {server} - the server to connect to
+        {port} - the port to connect to
+        {network} - the name of the network
+        {checkpoint} - the path to the checkpoint file
 """
 
 def set_root_dir(path) :
@@ -124,6 +131,13 @@ def run_network(network, dataset, run_tag, epochs, learning_rate, batch_size) :
     train_image, train_label, test_image, test_label = extract_data(dataset)
     run.run(epochs, train_image, train_label, test_image, test_label, verbose=True)
 
+def start_listener(server, port, network, checkpoint) :
+        from tensornet.listen import FF_listener
+
+        listener = FF_listener(server, port, network.create_network(), checkpoint)
+
+        listener.listen()
+
 def generate_runid() :
     vowels = ['a', 'e', 'i', 'o', 'u']
     consonants = ['b', 'd', 'k', 'f', 'h', 'j', 'k', 'l' 'm', 'n', 'p', 'r', 's', 't', 'v', 'w', 'x', 'z', 'st', 'ch', 'sh'] 
@@ -163,8 +177,15 @@ def main() :
 
         run_network(net, dataset, args[3], int(args[4]), float(args[5]), int(args[6]))
 
-    elif args[0] == "random" :
-        print(generate_runid())
+    elif args[0] == "listen" :
+        server = args[1]
+        port = int(args[2])
+        network = find_network(args[3], get_networks())
+        if (network is None) :
+            return
+
+        start_listener(server, port, network, args[4])
+
 
     else :
         print(help_message)
