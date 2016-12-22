@@ -144,16 +144,16 @@ class Run :
         # message += "\ndate:{}".format(str(date))
         # self._write_log(message, verbose=verbose)
 
+        if (verbose) :
+            print("starting run")
+
+        if (self.restoring) :
+            print("restoring previous run")
+            self.network.saver.restore(self.session, self.save_path + "-" + str(self.iter_sum))
+
         for e in range(epochs) :
 
-            if (verbose) :
-                print("starting run")
-
-            if (self.restoring) :
-                print("restoring previous run")
-                self.network.saver.restore(self.session, self.save_path + "-" + str(self.iter_sum))
-
-            for feed_dict in self._feed_dict(train_data, train_labels) :
+           for feed_dict in self._feed_dict(train_data, train_labels) :
                 self.iter_sum += 1
 
                 if (self.logging and (self.iter_sum % 10 == 0)) :
