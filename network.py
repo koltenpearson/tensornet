@@ -88,7 +88,7 @@ class Run :
         return "lr{}bs{}".format(self.learning_rate, self.batch_size)
 
     def _get_runid(self) :
-        return "{}".format(self.run_label, self._get_hyperid())
+        return "{}{}".format(self.run_label, self._get_hyperid())
 
     #TODO make clear that enable logging must be ran after hyperparameters are set
     def enable_logging(self, log_dir) :
