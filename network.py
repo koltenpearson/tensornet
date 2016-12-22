@@ -153,7 +153,7 @@ class Run :
 
         for e in range(epochs) :
 
-           for feed_dict in self._feed_dict(train_data, train_labels) :
+            for feed_dict in self._feed_dict(train_data, train_labels) :
                 self.iter_sum += 1
 
                 if (self.logging and (self.iter_sum % 10 == 0)) :
@@ -168,9 +168,9 @@ class Run :
 
             if self.logging :
                 test_summ = tf.Summary(value=[
-                                              tf.Summary.Value(tag="accuracy", simple_value=current_accuracy),
-                                              tf.Summary.Value(tag="loss", simple_value=current_loss)
-                                             ])
+                    tf.Summary.Value(tag="accuracy", simple_value=current_accuracy),
+                    tf.Summary.Value(tag="loss", simple_value=current_loss)
+                    ])
                 self.test_writer.add_summary(test_summ, self.iter_sum)
 
             if self.saving and (e % self.save_freq == 0) :
