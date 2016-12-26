@@ -15,11 +15,10 @@ class FF_listener :
         self.checkpoint = checkpoint
         self.name = name
         if (name is None) :
-            name = self.network.network_name
+            self.name = self.network.network_name
 
         self.connection = Connection(server, port)
         self.connection.use(self.name + OUT_TAG)
-        self.connection.ignore("default")
         self.connection.watch(self.name + IN_TAG)
         self.connection.ignore("default")
 
@@ -36,20 +35,22 @@ class FF_listener :
         while(True) :
 
             job = self.connection.reserve_bytes()
+            print('starting job')
             image = np.frombuffer(job.body, dtype=np.uint8).reshape((1,28,28,1)) #TODO variable sizes in
             #TODO describe normalization steps somewhere and make it variable as well
 
             normalized_image = (image/255).astype(np.float32)
 
-            feed_dict = {network.data: normalized_image}
+            feed_dict = {self.network.get_input(): normalized_image}
 
             for tensor, _ in self.network.get_dropouts() :
                 feed_dict[tensor] = 1.0
 
 
-            result = session.run(network.prediction, feed_dict = feed_dict)
+            result = session.run(self.network.prediction, feed_dict = feed_dict)
 
-            message = {"id" : job.jid, "result" : result}
+            message = {"id" : job.job_id, "result" : result[0].item() }
+            print(message)
 
             job.delete()
-            self.connection.put(json.dumps(message))
+            self.connection.put(json.dumps(message, ensure_ascii=False))
