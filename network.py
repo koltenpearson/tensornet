@@ -371,6 +371,20 @@ class Network :
             full = activation(tf.matmul(flat_input, weights) + biases)
             self._add(name, full)
 
+#optimizers
+############################################################################
+    def use_SGD(self) :
+        with self.graph.as_default() :
+            self.learning_rate = tf.placeholder(tf.float32, shape=[])
+            self.optimizer = tf.train.GradientDescentOptimizer(self.learning_rate)
+
+    def use_adam(self, beta1=0.9, beta2=0.999, epsilon=1e-08) :
+        with self.graph.as_default() :
+            self.learning_rate = tf.placeholder(tf.float32, shape=[])
+            self.optimizer = tf.train.AdamOptimizer(self.learning_rate, beta1=beta1, beta2=beta2, epsilon=epsilon)
+            
+
+
     def enable_tensorboard(self) :
         self.tboard = True
         with self.graph.as_default() :
@@ -385,8 +399,7 @@ class Network :
     def finalize(self) :
         with self.graph.as_default() :
             self._use_cross_entropy()
-            self.learning_rate = tf.placeholder(tf.float32, shape=[])
-            self.train_step = tf.train.GradientDescentOptimizer(self.learning_rate).minimize(self.cost_function)
+            self.train_step = self.optimizer.minimize(self.cost_function)
             self.prediction = tf.argmax(self._get_previous_tensor(), 1)
             self.check_prediction = tf.equal(tf.argmax(self._get_previous_tensor(), 1), tf.argmax(self.get_labels(), 1))
             self.accuracy = tf.reduce_mean(tf.cast(self.check_prediction, tf.float32))
