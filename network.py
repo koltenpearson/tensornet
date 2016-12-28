@@ -50,7 +50,7 @@ class Run :
                 self.iter_sum = json.load(open(self.meta_path))["iter_sum"]
                 self.restoring = True
 
-    def _feed_dict(self, data, labels, train=True) :
+    def _feed_dict(self, data, labels, train=True, shuffle=True) :
         input_holder = self.network.get_input()
         label_holder = self.network.get_labels()
 
@@ -59,7 +59,10 @@ class Run :
             batch_size = self.batch_size
 
         iterations = math.ceil(data.shape[0] / batch_size)
-        for i in range(iterations) :
+        perm = np.arange(iterations)
+        if (shuffle and train) :
+            np.random.shuffle(perm)
+        for i in perm :
             batch_start = (i * batch_size)
             batch_end = batch_start + batch_size
             lr_ratio = 1
