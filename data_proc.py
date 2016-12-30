@@ -20,8 +20,7 @@ def to_one_hot(source, cat_list) :
     for i, c in enumerate(cat_list) :
         categories[c] = i
 
-    dims = source.shape
-    result = np.zeros((dims[0], len(categories.keys())), dtype=np.uint8)
+    result = np.zeros((len(source), len(categories.keys())), dtype=np.uint8)
     
     for i, s in enumerate(source) :
 
@@ -40,9 +39,10 @@ def get_mean(dataset) :
     return np.mean(dataset, dtype=np.float64)
 
 def shuffle_data(images, labels) :
-    indices = np.shuffle(np.arange(len(images)))
+    indices = np.arange(len(images))
+    np.random.shuffle(indices)
 
-    return images[indices], labels[indices]
+    return images[()][indices], labels[()][indices]
 
 
 def insert_strings_into_h5(string_list, dat, name="label_info") :
