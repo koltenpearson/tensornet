@@ -4,7 +4,7 @@ import math
 import datetime
 import os
 import json
-
+from .preprocess import Preprocessor
 
 POOL_NAME = "pool"
 CONV_NAME = "conv"
@@ -13,22 +13,13 @@ INPUT_NAME = "input"
 LABEL_NAME = "label"
 LOCAL_NORM = "lrnorm"
 DROPOUT_NAME = "dropout"
-
-class LayerInfo :
-    #TODO get rid of?
-
-    def __init__(self, name, shape_weights, shape_biases, shape_output) :
-        self.name = name
-        self.weight_shape = shape_weights
-        self.bias_shape = shape_biases
-        self.output_shape = shape_output
-
+AUGMENT_NAME = "augment"
+TRAINING_FLAG = "training"
 class Run :
 
-    def __init__(self, network, run_label) :
+    def __init__(self, network, dataset, run_label) :
         self.run_label = run_label
-        if not network.finalized :
-            network.finalize()
+        self.dataset = dataset
         self.network = network
 
         self.learning_rate = None
@@ -39,6 +30,23 @@ class Run :
         self.iter_sum = 0
         self.restoring = False
 
+    #TODO refractor so we do not need to different object for train/test
+    def initialize(self) :
+        graph = tf.Graph()
+        self.train_prep = Preprocessor(self.dataset, self.batch_size, graph, training = True)
+        self.test_prep = Preprocessor(self.dataset, self.batch_size, graph, training = False)
+        self.network.preprocess(self.train_prep)
+        self.network.preprocess(self.test_prep)
+        self.train_prep.finalize()
+        self.test_prep.finalize()
+
+        temp_network = Network(self.network.network_name, graph, (self.train_prep.dequeue_batch, self.test_prep.dequeue_batch))
+
+        self.network.construct_network(temp_network)
+        self.network = temp_network
+
+        if not self.network.finalized :
+            self.network.finalize()
 
     def _write_iteration(self) :
         if(self.saving) :
@@ -50,42 +58,30 @@ class Run :
                 self.iter_sum = json.load(open(self.meta_path))["iter_sum"]
                 self.restoring = True
 
-    def _feed_dict(self, data, labels, train=True, shuffle=True) :
-        input_holder = self.network.get_input()
-        label_holder = self.network.get_labels()
+    def _feed_dict(self, train=True, lr_ratio = 1.0) :
+        result = {}
 
-        batch_size = self.testing_batch_size
         if(train) :
-            batch_size = self.batch_size
+            result[self.network.learning_rate] = self.learning_rate * lr_ratio
 
-        iterations = math.ceil(data.shape[0] / batch_size)
-        perm = np.arange(iterations)
-        if (shuffle and train) :
-            np.random.shuffle(perm)
-        for i in perm :
-            batch_start = (i * batch_size)
-            batch_end = batch_start + batch_size
-            lr_ratio = 1
+            result[self.network.extra[TRAINING_FLAG]] = True
 
-            if (batch_end > data.shape[0]) :
-                batch_end = data.shape[0]
-                lr_ratio = (batch_end - batch_start) / batch_size
+            for tensor, value in self.network.extra[DROPOUT_NAME] :
+                result[tensor] = value
 
-            result = {
-                        input_holder:data[batch_start:batch_end],
-                        label_holder:labels[batch_start:batch_end],
-                     }
+            for tensor in self.network.extra[AUGMENT_NAME] :
+                result[tensor] = True
 
-            if(train) :
-                result[self.network.learning_rate] = self.learning_rate * lr_ratio
-                for tensor, value in self.network.get_dropouts() :
-                    result[tensor] = value
-            else :
-                for tensor, value in self.network.get_dropouts() :
-                    result[tensor] = 1.0
+        else :
+            result[self.network.extra[TRAINING_FLAG]] = False
 
+            for tensor, value in self.network.extra[DROPOUT_NAME] :
+                result[tensor] = 1.0
 
-            yield result
+            for tensor in self.network.extra[AUGMENT_NAME] :
+                result[tensor] = False
+
+        return result
 
     def _get_hyperid(self) :
         return "lr{}bs{}".format(self.learning_rate, self.batch_size)
@@ -112,40 +108,39 @@ class Run :
         self.save_freq=save_freq
         self.saving = True
 
-    def _initialize(self) :
+    def _prep_session(self) :
         self.session = tf.Session(graph=self.network.graph)
         self.session.run(self.network.initialize)
         if self.testing_batch_size == None :
             self.testing_batch_size = self.batch_size
 
-    def _run_test(self, test_data, test_labels) :
+    def _run_test(self, final=False) :
         run_acc = 0
         run_loss = 0
 
-        for i, feed_dict in enumerate(self._feed_dict(test_data, test_labels, train=False)) :
+        while True :
 
-            current_loss, current_accuracy = self.session.run([self.network.cost_function, self.network.accuracy], feed_dict=feed_dict)
+            try : 
+                current_loss, current_accuracy = self.session.run([self.network.cost_function, self.network.accuracy], feed_dict=self._feed_dict(train=False))
 
-            batch_start = (i * self.testing_batch_size) #TODO this code is repeated from _feed_dict, any way around that?
-            batch_end = batch_start + self.testing_batch_size
-            if (batch_end > test_data.shape[0]) :
-                batch_end = test_data.shape[0]
+                run_acc += (current_accuracy  * self.batch_size)
+                run_loss += (current_loss  * self.batch_size)
 
-            run_acc += (current_accuracy  * (batch_end - batch_start))
-            run_loss += (current_loss  * (batch_end - batch_start))
+            except tf.errors.OutOfRangeError :
+                break
 
-        return ((run_acc / test_data.shape[0]), (run_loss / test_data.shape[0]))
+        if (not final) :
+            self.test_prep.start(1, self.session, feed_threads=8)
+
+        return ((run_acc / self.dataset.testing_len()), (run_loss / self.dataset.testing_len()))
     
 
-    def run(self, epochs, train_data, train_labels, test_data, test_labels, verbose=False) :
-        self._initialize()
+    def run(self, epochs, verbose=False) :
+        self._prep_session()
 
-        # TODO eventually incorporate all this metadata somehow . . .
-        # self._write_seperation()
-        # message = "STARTING RUN epochs: {} batch_size: {} ({} iterations per epoch) learning_rate: {}".format(epochs, batch_size, iterations, self.learning_rate)
-        # date = datetime.datetime.today()
-        # message += "\ndate:{}".format(str(date))
-        # self._write_log(message, verbose=verbose)
+        set_size = self.dataset.training_len()
+        iter_per_epoch = math.floor(set_size / self.batch_size)
+        print("iter_per_epoc : {}".format(iter_per_epoch))
 
         if (verbose) :
             print("starting run")
@@ -154,59 +149,68 @@ class Run :
             print("restoring previous run")
             self.network.saver.restore(self.session, self.save_path + "-" + str(self.iter_sum))
 
-        for e in range(epochs) :
+        self.train_prep.start(epochs, self.session, feed_threads=16)
+        self.test_prep.start(1, self.session, feed_threads=8)
 
-            for feed_dict in self._feed_dict(train_data, train_labels) :
+        looping = True
+        while looping :
+
+            try :
                 self.iter_sum += 1
+                print("iter {}".format(self.iter_sum))
 
                 if (self.logging and (self.iter_sum % 10 == 0)) :
-                    _, summary =self. session.run([self.network.train_step, self.network.summaries], feed_dict=feed_dict)
+                    _, summary =self. session.run([self.network.train_step, self.network.summaries], feed_dict=self._feed_dict(train=True))
                     self.train_writer.add_summary(summary, self.iter_sum)
                 else :
-                    self.session.run([self.network.train_step, self.network.accuracy], feed_dict=feed_dict)
+                    self.session.run(self.network.train_step, feed_dict=self._feed_dict(train=True))
+            except tf.errors.OutOfRangeError :
+                print("completed training")
+                looping = False
 
-            current_accuracy, current_loss = self._run_test(test_data, test_labels)
-            if verbose :
-                print("Epoch: {}; Acc: {}; Loss: {}".format(e + 1, current_accuracy, current_loss))
+            if (self.iter_sum % iter_per_epoch == 0) :
+                print("starting test")
+                e = self.iter_sum / iter_per_epoch
+                current_accuracy, current_loss = self._run_test(self.dataset)
 
-            if self.logging :
-                test_summ = tf.Summary(value=[
-                    tf.Summary.Value(tag="accuracy", simple_value=current_accuracy),
-                    tf.Summary.Value(tag="loss", simple_value=current_loss)
-                    ])
-                self.test_writer.add_summary(test_summ, self.iter_sum)
+                if verbose :
+                    print("Epoch: {}; Acc: {}; Loss: {}".format(e + 1, current_accuracy, current_loss))
 
-            if self.saving and (e % self.save_freq == 0) :
-                print("saving epoch")
-                print(self.save_path)
-                self.network.saver.save(self.session, self.save_path, global_step=self.iter_sum)
-                self._write_iteration()
+                if self.logging :
+                    test_summ = tf.Summary(value=[
+                        tf.Summary.Value(tag="accuracy", simple_value=current_accuracy),
+                        tf.Summary.Value(tag="loss", simple_value=current_loss)
+                        ])
+                    self.test_writer.add_summary(test_summ, self.iter_sum)
+
+                if self.saving and (e % self.save_freq == 0) :
+                    print("saving epoch")
+                    print(self.save_path)
+                    self.network.saver.save(self.session, self.save_path, global_step=self.iter_sum)
+                    self._write_iteration()
 
 
         if(self.logging) : 
             self.test_writer.close()
             self.train_writer.close()
 
-        # fdate = datetime.datetime.today()
-        # self._write_log("Finish Date : {} ".format(fdate), verbose = verbose)
-        # etime = fdate - date
-        # self._write_log("Elapsed Time : {} days {} hours {} minutes ".format(etime.days, etime.seconds // (60**2), (etime.seconds % (60**2)) // 60), verbose=verbose)
-
 class Network :
 
 #internals
 ############################################################################   
 
-    def __init__(self, name) :
+    def __init__(self, name, graph, dequeue_ops) :
         self.network_name = name
-        self.graph = tf.Graph()
+        self.graph = graph
+        self.dequeue_ops = dequeue_ops
         self.layers = []
         self.names = []
-        self.dropouts = []
         self.weights = {}
         self.biases = {}
+        self.extra = {DROPOUT_NAME : [], AUGMENT_NAME : []}
         self.tboard = False
         self.finalized = False
+        self._setup_input_layer()
 
     def _next_layer(self) :
         self.layers.append([])
@@ -262,64 +266,17 @@ class Network :
     def _use_cross_entropy(self) :
         self.cost_function = tf.reduce_mean(-tf.reduce_sum(self.get_labels() * tf.log(self._get_previous_tensor() + 1e-10), reduction_indices=[1]))
 
-
-#visualization/log functions
-############################################################################
-
-    def get_info(self) :
-        result = []
-        for layer_group,name_group in zip(self.layers, self.names) :
-            result.append([])
-            for l,n in zip(layer_group, name_group) :
-                weight = ()
-                if (n in self.weights) :
-                    weight = self.weights[n].get_shape()
-
-                bias = ()
-                if (n in self.biases) :
-                    bias = self.biases[n].get_shape()
-
-                out_shape = [d.value for d in l.get_shape().dims]
-
-                result[-1].append(LayerInfo(n, weight, bias, out_shape))
-
-        return result
-                    
-
-    def print_network(self) :
-        divide = '->'
-        output = "Network: {}\n".format(self.network_name)
-        for layer_group,name_group in zip(self.layers, self.names) :
-            for l,n in zip(layer_group, name_group) :
-                weight = ()
-                if (n in self.weights) :
-                    weight = self.weights[n].get_shape()
-
-                bias = ()
-                if (n in self.biases) :
-                    bias = self.biases[n].get_shape()
-                    
-                output += "{}: w{}, b{}, s{} {} ".format(n,
-                        weight,
-                        bias,
-                        [d.value for d in l.get_shape().dims], 
-                        divide)
-
-            output += '\n'
-
-        return output[:-4]
-
-#layer functions
-############################################################################
-
-    def add_input_layer(self, data_shape, label_shape) :
+    def _setup_input_layer(self) : #, data_shape, label_shape) :
         self._next_layer()
         with self.graph.as_default(), self.graph.name_scope(self._gen_name(INPUT_NAME)) :
-            inp = tf.placeholder(tf.float32, data_shape)
-            lab = tf.placeholder(tf.float32, label_shape)
+            training_flag = tf.placeholder(tf.bool)
+            self.extra[TRAINING_FLAG] = training_flag
+            inp, lab = tf.cond(training_flag, lambda:self.dequeue_ops[0], lambda:self.dequeue_ops[1])
             self._add(self._gen_name(LABEL_NAME), lab)
             self._add(self._gen_name(INPUT_NAME), inp)
 
+#learning layers
+############################################################################
     def add_conv_layer(self, filter_size, filter_depth, stride=1, activation=tf.nn.relu) :
         self._next_layer()
         name = self._gen_name(CONV_NAME)
@@ -352,7 +309,7 @@ class Network :
         with self.graph.as_default(), self.graph.name_scope(name) :
             inp = self._get_previous_tensor()
             keep = tf.placeholder(tf.float32)
-            self.dropouts.append((keep, keep_prob))
+            self.extra[DROPOUT_NAME].append((keep, keep_prob))
             drop = tf.nn.dropout(inp, keep)
             self._add(name, drop)
 
@@ -386,8 +343,6 @@ class Network :
             self.learning_rate = tf.placeholder(tf.float32, shape=[])
             self.optimizer = tf.train.AdamOptimizer(self.learning_rate, beta1=beta1, beta2=beta2, epsilon=epsilon)
             
-
-
     def enable_tensorboard(self) :
         self.tboard = True
         with self.graph.as_default() :
