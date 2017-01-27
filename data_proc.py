@@ -38,6 +38,9 @@ def get_norms(dataset) :
 def get_mean(dataset) :
     return np.mean(dataset, dtype=np.float64)
 
+def get_stddev(dataset) :
+    return np.std(dataset, dtype=np.float64) 
+
 def shuffle_data(images, labels) :
     indices = np.arange(len(images))
     np.random.shuffle(indices)
@@ -100,6 +103,7 @@ def make_mnist_h5py(loc) :
     train_image, train_label, test_image, test_label, cat_list = get_mnist()
     min, max = get_norms(train_image)
     mean = get_mean(train_image)
+    stddev = get_stddev(train_image)
 
     cat_list = [str(l) for l in cat_list]
 
@@ -109,6 +113,7 @@ def make_mnist_h5py(loc) :
     out_test_label = dat.create_dataset('test_label', data=test_label, dtype=np.uint8)
     insert_strings_into_h5(cat_list, dat, name="label_info")
     out_max = dat.create_dataset('max', data=[max], dtype=np.float64)
-    out_max = dat.create_dataset('min', data=[min], dtype=np.float64)
-    out_max = dat.create_dataset('mean', data=[mean], dtype=np.float64)
+    out_min = dat.create_dataset('min', data=[min], dtype=np.float64)
+    out_mean = dat.create_dataset('mean', data=[mean], dtype=np.float64)
+    out_stddev = dat.create_dataset('stddev', data=[stddev], dtype=np.float64)
 

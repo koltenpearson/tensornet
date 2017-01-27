@@ -14,6 +14,77 @@ LABEL_NAME = "label"
 LOCAL_NORM = "lrnorm"
 DROPOUT_NAME = "dropout"
 
+##This class is used to make it easier to build a network with layers
+# it only has a few methods such a person would care about
+# the network builder needs to be more aware of its other methods.
+#
+class LayerUtil :
+
+    def __init__(self) :
+        self.activations = {"relu" : tf.nn.relu,"softmax" : tf.nn.softmax}
+        self.weight_initializer = tf.contrib.layers.xavier_initializer()
+        self.bias_initializer = tf.random_normal_initializer()
+
+    #this method will return the last layers output
+    # as a tensor
+    def get_previous_tensor(self) :
+        pass
+
+    #returns a new weight (or existing weight, if it has already been initialized)
+    def get_weight(self, shape, dtype=tf.float32) :
+        name = "weight"
+        try :
+            result = tf.get_variable(name, shape, dtype=dtype, initializer=self.weight_initializer)
+        except ValueError :
+            tf.get_variable_scope().reuse_variables()
+            result = tf.get_variable(name, shape, dtype=dtype, initializer=self.weight_initializer)
+
+        return result
+
+    #returns a new weight (or existing weight, if it has already been initialized)
+    def get_weight(self, shape, dtype=tf.float32) :
+        name = "weight"
+        try :
+            result = tf.get_variable(name, shape, dtype=dtype, initializer=self.weight_initializer)
+        except ValueError :
+            tf.get_variable_scope().reuse_variables()
+            result = tf.get_variable(name, shape, dtype=dtype, initializer=self.weight_initializer)
+
+        return result
+
+    #returns a new bias (or existing if it has already been initialized)
+    def get_bias(self, shape, dtype=tf.float32) :
+        name = "bias"
+        try :
+            result = tf.get_variable(name, shape, dtype=dtype, initializer=self.bias_initializer)
+        except ValueError :
+            tf.get_variable_scope().reuse_variables()
+            result = tf.get_variable(name, shape, dtype=dtype, initializer=self.bias_initializer)
+
+        return result
+
+
+    #returns activation functions based off a key, used to make them serializable
+    def get_activation(self, key) :
+        return self.activations[keys]
+
+#Intermediate class that comes from what the user defined, can be used to generate graph, or other ops
+class NetSpec : 
+
+    def __init__(self, params) :
+        self.params = params
+
+    def create_network(self) :
+        net = Network()
+
+
+#just a data holding class for network and desired tensor ops
+class Network :
+
+    def __init__(self) :
+        self.graph = tf.graph()
+
+
 class LayerInfo :
     #TODO get rid of?
 
@@ -192,7 +263,7 @@ class Run :
         # etime = fdate - date
         # self._write_log("Elapsed Time : {} days {} hours {} minutes ".format(etime.days, etime.seconds // (60**2), (etime.seconds % (60**2)) // 60), verbose=verbose)
 
-class Network :
+class Network_old :
 
 #internals
 ############################################################################   
