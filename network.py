@@ -1,6 +1,7 @@
 import tensorflow as tf
 import numpy as np
 import math
+import types
 import datetime
 import os
 import json
@@ -20,26 +21,23 @@ DROPOUT_NAME = "dropout"
 #
 class LayerUtil :
 
-    def __init__(self) :
-        self.activations = {"relu" : tf.nn.relu,"softmax" : tf.nn.softmax}
+    def __init__(self, input_tensor, label_tensor) :
+        self.activations = {"relu" : tf.nn.relu,"softmax" : tf.nn.softmax, "none" : lambda x:x}
         self.weight_initializer = tf.contrib.layers.xavier_initializer()
         self.bias_initializer = tf.random_normal_initializer()
+        self.prev_tensor = input_tensor
+        self.label_tensor = label_tensor
 
     #this method will return the last layers output
     # as a tensor
     def get_previous_tensor(self) :
-        pass
+        return prev_tensor
 
-    #returns a new weight (or existing weight, if it has already been initialized)
-    def get_weight(self, shape, dtype=tf.float32) :
-        name = "weight"
-        try :
-            result = tf.get_variable(name, shape, dtype=dtype, initializer=self.weight_initializer)
-        except ValueError :
-            tf.get_variable_scope().reuse_variables()
-            result = tf.get_variable(name, shape, dtype=dtype, initializer=self.weight_initializer)
+    def get_label_tensor(self) :
+        return label_tensor
 
-        return result
+    def update_latest(self, tensor) :
+        self.prev_tensor = tensor
 
     #returns a new weight (or existing weight, if it has already been initialized)
     def get_weight(self, shape, dtype=tf.float32) :
@@ -68,21 +66,143 @@ class LayerUtil :
     def get_activation(self, key) :
         return self.activations[keys]
 
+class PreProcUtil :
+
+    def __init__(self, dataset, start_tensor) :
+        self.stddev = dataset.get_stddev()
+        self.mean = dataset.get_mean()
+        self.data_min = dataset.get_min()
+        self.data_max = dataset.get_max()
+        self.prev_tensor = start_tensor
+
+    def get_previous_tensor(self) :
+        return self.prev_tensor
+
+    def update_tensor(self, tensor) :
+        self.prev_tensor = tensor
+
+
 #Intermediate class that comes from what the user defined, can be used to generate graph, or other ops
 class NetSpec : 
 
     def __init__(self, params) :
-        self.params = params
+        self.source = {}
+        for p in self.params :
+            if p.stage not in self.source :
+                self.source[p.stage] = []
+            self.source[p.stage].append(p)
 
-    def create_network(self) :
+    def create_network(self, dataset, batch_size) :
         net = Network()
 
+        self._setup_index_read(net.train_prep)
+        self._setup_preprocessing(net.train_prep, dataset, batch_size, train=True)
+        self._setup_network_graph(net.train, net.train_prep, train=True)
+        self._setup_accuracy(net.train, net.train_prep, train=True)
+        self._setup_loss(net.train, net.train_prep, train=True)
+        self._setup_optimizer(net.train, net.train_prep, train=True)
+
+        self._setup_index_read(net.eval_prep)
+        self._setup_preprocessing(net.eval_prep, dataset, batch_size, train=False)
+        self._setup_network_graph(net.eval, net.eval_prep, train=False)
+        self._setup_accuracy(net.eval, net.eval_prep, train=False)
+        self._setup_loss(net.eval, net.eval_prep, train=False)
+
+        return net
+
+    def _setup_index_read(self, prep)  :
+        with net.graph.as_default(), tf.variable_scope("prep") :
+            prep.index = tf.placeholder(tf.int32, shape=())
+            index_queue = tf.FIFOQueue(batch_size * 5, dtypes=[tf.int32])
+            prep.index_enqueue = index_queue.enqueue(prep.index)
+            prep.index_dequeue = index_queue.dequeue()
+
+    def _setup_preprocessing(self, prep, dataset, batch_size, train=True) :
+            image, label = dataset.get_shape() #TODO should I even assume these are normalized sizes coming in?
+
+            prep.image_in = tf.placeholder(tf.float32, shape=image.shape[1:])
+            prep.label_in = tf.placeholder(tf.float32, shape=label.shape[1:])
+
+            p_util = PreProcUtil(dataset, prep.image_in)
+
+            for l in self.params[layer.PREPROCESS_STAGE] :
+                if train :
+                    tensor = l.build_layer(p_util)
+                else :
+                    tensor = l.build_eval_layer(p_util)
+                p_util.update_tensor(tensor)
+
+            ##now we build the output queues
+            inp = p_util.get_previous_tensor()
+            batch_queue = tf.FIFOQueue(batch_size * 5, [tf.float32, tf.float32], [inp.get_shape().dims, prep.label_in.get_shape().dims])
+            prep.batch_enqueue = batch_queue.enqueue((inp, prep.label_in))
+            prep.image_out, prep.label_out = batch_queue.dequeue_up_to(batch_size)
+
+    def _setup_network_graph(self, net, prep, train=True) :
+        with net.graph.as_default() :
+
+            l_util = LayerUtil(prep.image_out, prep.label_out)
+
+            for i,layer in enumerate(self.params[layer.NETWORK_STAGE]) :
+                name = layer.tag + str(i)
+                with tf.variable_scope(name) :
+                    if train :
+                        tensor = layer.build_layer(l_util)
+                    else :
+                        tensor = layer.build_eval_layer(l_util)
+
+                    l_util.update_latest(tensor)
+
+            net.final = l_util.get_previous_tensor(tensor)
+
+        #decide how to fill in backprop and whatnot with different types
+
+
+    def _setup_accuracy(self, net, prep, train=True) :
+        with net.graph.as_default(), tf.variable_scope("accuracy") :
+
+            acc = self.params[layer.ACCURACY_STAGE]
+            l_util = LayerUtil(net.final, prep.label_out)
+            if train :
+                net.accuracy = acc.build_layer(l_util)
+            else :
+                net.accuracy = acc.build_eval_layer(l_util)
+
+    def _setup_loss(self, net, prep, train=True) :
+        with net.graph.as_default(), tf.variable_scope("loss") :
+
+            loss = self.params[layer.LOSS_STAGE]
+            l_util = LayerUtil(net.final, prep.label_out)
+            if train :
+                net.loss = acc.build_layer(l_util)
+            else :
+                net.loss = acc.build_eval_layer(l_util)
+
+    def _setup_optimizer(self, net, prep, train=True) :
+        with net.graph.as_default(), tf.variable_scope("optimizer") :
+
+            opt = self.params[layer.OPTIMIZER_STAGE]
+            l_util = LayerUtil(net.loss, prep.label_out)
+            if train :
+                net.optimizer = opt.build_layer(l_util)
+            else :
+                net.optimizer = opt.build_eval_layer(l_util)
 
 #just a data holding class for network and desired tensor ops
+# essentially a complex struct
 class Network :
 
     def __init__(self) :
         self.graph = tf.graph()
+        train_prep = types.SimpleNamspace() #to hold data
+        eval_prep = types.SimpleNamspace()
+        train = types.SimpleNamspace()
+        eval = types.SimpleNamspace() #TODO is this a bad name?
+
+
+################################################################################
+################################################################################
+################################################################################
 
 
 class LayerInfo :
