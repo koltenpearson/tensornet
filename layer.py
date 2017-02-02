@@ -19,7 +19,7 @@ class Layer :
         raise NotImplementedError()
 
     def build_eval_layer(self, util) :
-        self.build_layer(util) #only overwrite if you need it to be overwritten
+        return self.build_layer(util) #only overwrite if you need it to be overwritten
 
     def parameter_spec(self) :
         return ()#only overwrite if you need it to be overwritten
@@ -44,8 +44,8 @@ class FullLayer(Layer) :
             if (d.value != None) :
                 flat_shape *= d.value
 
-        weight = layer_util.get_weight([flat_shape, depth])
-        bias = layer_util.get_bias([depth])
+        weight = layer_util.get_weight([flat_shape, self.depth])
+        bias = layer_util.get_bias([self.depth])
         flat_input = tf.reshape(inp, [-1, flat_shape])
         result = act(tf.matmul(flat_input, weight) + bias)
 
@@ -62,8 +62,8 @@ class SoftmaxLossLayer(Layer) :
         pass
 
     def build_layer(self, layer_util) :
-        pred = layer.get_previous_tensor()
-        label = layer.get_label()
+        pred = layer_util.get_previous_tensor()
+        label = layer_util.get_label_tensor()
 
         return tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(pred, label))
 
@@ -74,9 +74,9 @@ class OnehotAccuracyLayer(Layer) :
     def __init__(self) :
         pass
 
-    def build_layer(self,layer_util) :
-        pred = layer.get_previous_tensor()
-        label = layer.get_label()
+    def build_layer(self, layer_util) :
+        pred = layer_util.get_previous_tensor()
+        label = layer_util.get_label_tensor()
 
         correct = tf.equal(tf.argmax(pred, 1), tf.argmax(label, 1))
         return tf.reduce_mean(tf.cast(correct, tf.float32))
@@ -90,7 +90,7 @@ class GradDescentLayer(Layer) :
 
     def build_layer(self,layer_util) :
         loss = layer_util.get_previous_tensor()
-        return tf.train.GradientDescentOptimizer(learning_rate).minimize(loss)
+        return tf.train.GradientDescentOptimizer(self.learning_rate).minimize(loss)
 
     def parameter_spec(self) :
         return (("learning_rate", self.learning_rate),)

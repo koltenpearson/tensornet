@@ -5,6 +5,9 @@ import types
 import datetime
 import os
 import json
+from collections import defaultdict
+
+import layer #TODO switch to in package ref
 
 
 POOL_NAME = "pool"
@@ -31,10 +34,10 @@ class LayerUtil :
     #this method will return the last layers output
     # as a tensor
     def get_previous_tensor(self) :
-        return prev_tensor
+        return self.prev_tensor
 
     def get_label_tensor(self) :
-        return label_tensor
+        return self.label_tensor
 
     def update_latest(self, tensor) :
         self.prev_tensor = tensor
@@ -64,7 +67,7 @@ class LayerUtil :
 
     #returns activation functions based off a key, used to make them serializable
     def get_activation(self, key) :
-        return self.activations[keys]
+        return self.activations[key]
 
 class PreProcUtil :
 
@@ -86,42 +89,47 @@ class PreProcUtil :
 class NetSpec : 
 
     def __init__(self, params) :
-        self.source = {}
-        for p in self.params :
-            if p.stage not in self.source :
-                self.source[p.stage] = []
-            self.source[p.stage].append(p)
+        self.params = defaultdict (lambda : [])
+        for p in params :
+            self.params[p.stage].append(p)
 
     def create_network(self, dataset, batch_size) :
         net = Network()
+        with net.graph.as_default() :
 
-        self._setup_index_read(net.train_prep)
-        self._setup_preprocessing(net.train_prep, dataset, batch_size, train=True)
-        self._setup_network_graph(net.train, net.train_prep, train=True)
-        self._setup_accuracy(net.train, net.train_prep, train=True)
-        self._setup_loss(net.train, net.train_prep, train=True)
-        self._setup_optimizer(net.train, net.train_prep, train=True)
+            self._setup_index_read(net.train_prep, batch_size)
+            self._setup_preprocessing(net.train_prep, dataset, batch_size, train=True)
+            self._setup_network_graph(net.train, net.train_prep, train=True)
+            self._setup_accuracy(net.train, net.train_prep, train=True)
+            self._setup_loss(net.train, net.train_prep, train=True)
+            self._setup_optimizer(net.train, net.train_prep, train=True)
 
-        self._setup_index_read(net.eval_prep)
-        self._setup_preprocessing(net.eval_prep, dataset, batch_size, train=False)
-        self._setup_network_graph(net.eval, net.eval_prep, train=False)
-        self._setup_accuracy(net.eval, net.eval_prep, train=False)
-        self._setup_loss(net.eval, net.eval_prep, train=False)
+
+            self._setup_index_read(net.eval_prep, batch_size)
+            self._setup_preprocessing(net.eval_prep, dataset, batch_size, train=False)
+            self._setup_network_graph(net.eval, net.eval_prep, train=False)
+            self._setup_accuracy(net.eval, net.eval_prep, train=False)
+            self._setup_loss(net.eval, net.eval_prep, train=False)
+
+            net.initialize = tf.global_variables_initializer()
 
         return net
 
-    def _setup_index_read(self, prep)  :
-        with net.graph.as_default(), tf.variable_scope("prep") :
+    def _setup_index_read(self, prep, batch_size)  :
+        with tf.variable_scope("prep") :
             prep.index = tf.placeholder(tf.int32, shape=())
             index_queue = tf.FIFOQueue(batch_size * 5, dtypes=[tf.int32])
             prep.index_enqueue = index_queue.enqueue(prep.index)
             prep.index_dequeue = index_queue.dequeue()
+            prep.index_queue = index_queue
 
     def _setup_preprocessing(self, prep, dataset, batch_size, train=True) :
-            image, label = dataset.get_shape() #TODO should I even assume these are normalized sizes coming in?
+        with tf.variable_scope("prep") :
+            image_shape, label_shape = dataset.get_shape() #TODO should I even assume these are normalized sizes coming in?
+            #TODO do I need the whole dataset for this . . .
 
-            prep.image_in = tf.placeholder(tf.float32, shape=image.shape[1:])
-            prep.label_in = tf.placeholder(tf.float32, shape=label.shape[1:])
+            prep.image_in = tf.placeholder(tf.float32, shape=image_shape)
+            prep.label_in = tf.placeholder(tf.float32, shape=label_shape)
 
             p_util = PreProcUtil(dataset, prep.image_in)
 
@@ -137,31 +145,27 @@ class NetSpec :
             batch_queue = tf.FIFOQueue(batch_size * 5, [tf.float32, tf.float32], [inp.get_shape().dims, prep.label_in.get_shape().dims])
             prep.batch_enqueue = batch_queue.enqueue((inp, prep.label_in))
             prep.image_out, prep.label_out = batch_queue.dequeue_up_to(batch_size)
+            prep.batch_queue = batch_queue
 
     def _setup_network_graph(self, net, prep, train=True) :
-        with net.graph.as_default() :
+        l_util = LayerUtil(prep.image_out, prep.label_out)
 
-            l_util = LayerUtil(prep.image_out, prep.label_out)
+        for i,l in enumerate(self.params[layer.NETWORK_STAGE]) :
+            name = l.tag + str(i)
+            with tf.variable_scope(name) :
+                if train :
+                    tensor = l.build_layer(l_util)
+                else :
+                    tensor = l.build_eval_layer(l_util)
+                l_util.update_latest(tensor)
 
-            for i,layer in enumerate(self.params[layer.NETWORK_STAGE]) :
-                name = layer.tag + str(i)
-                with tf.variable_scope(name) :
-                    if train :
-                        tensor = layer.build_layer(l_util)
-                    else :
-                        tensor = layer.build_eval_layer(l_util)
-
-                    l_util.update_latest(tensor)
-
-            net.final = l_util.get_previous_tensor(tensor)
-
-        #decide how to fill in backprop and whatnot with different types
+        net.final = l_util.get_previous_tensor()
 
 
     def _setup_accuracy(self, net, prep, train=True) :
-        with net.graph.as_default(), tf.variable_scope("accuracy") :
+        with tf.variable_scope("accuracy") :
 
-            acc = self.params[layer.ACCURACY_STAGE]
+            acc = self.params[layer.ACCURACY_STAGE][0]
             l_util = LayerUtil(net.final, prep.label_out)
             if train :
                 net.accuracy = acc.build_layer(l_util)
@@ -169,19 +173,19 @@ class NetSpec :
                 net.accuracy = acc.build_eval_layer(l_util)
 
     def _setup_loss(self, net, prep, train=True) :
-        with net.graph.as_default(), tf.variable_scope("loss") :
+        with tf.variable_scope("loss") :
 
-            loss = self.params[layer.LOSS_STAGE]
+            loss = self.params[layer.LOSS_STAGE][0]
             l_util = LayerUtil(net.final, prep.label_out)
             if train :
-                net.loss = acc.build_layer(l_util)
+                net.loss = loss.build_layer(l_util)
             else :
-                net.loss = acc.build_eval_layer(l_util)
+                net.loss = loss.build_eval_layer(l_util)
 
     def _setup_optimizer(self, net, prep, train=True) :
-        with net.graph.as_default(), tf.variable_scope("optimizer") :
+        with tf.variable_scope("optimizer") :
 
-            opt = self.params[layer.OPTIMIZER_STAGE]
+            opt = self.params[layer.OPTIMIZER_STAGE][0]
             l_util = LayerUtil(net.loss, prep.label_out)
             if train :
                 net.optimizer = opt.build_layer(l_util)
@@ -193,11 +197,11 @@ class NetSpec :
 class Network :
 
     def __init__(self) :
-        self.graph = tf.graph()
-        train_prep = types.SimpleNamspace() #to hold data
-        eval_prep = types.SimpleNamspace()
-        train = types.SimpleNamspace()
-        eval = types.SimpleNamspace() #TODO is this a bad name?
+        self.graph = tf.Graph()
+        self.train_prep = types.SimpleNamespace() #to hold data
+        self.eval_prep = types.SimpleNamespace()
+        self.train = types.SimpleNamespace()
+        self.eval = types.SimpleNamespace() #TODO is this a bad name?
 
 
 ################################################################################

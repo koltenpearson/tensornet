@@ -1,7 +1,6 @@
 #Some functions to aid in data processing
 
 import numpy as np
-import idx2numpy
 import h5py
 import os
 
@@ -39,7 +38,7 @@ def get_mean(dataset) :
     return np.mean(dataset, dtype=np.float64)
 
 def get_stddev(dataset) :
-    return np.std(dataset, dtype=np.float64) 
+    return np.std(dataset, dtype=np.float64)
 
 def shuffle_data(images, labels) :
     indices = np.arange(len(images))
@@ -56,6 +55,7 @@ def insert_strings_into_h5(string_list, dat, name="label_info") :
 
 
 def get_mnist() :
+    import idx2numpy
     ROOT = "mnist"
     train_images = os.path.join(ROOT, "train-images.idx")
     train_labels = os.path.join(ROOT, "train-labels.idx")
@@ -81,7 +81,7 @@ def validate_dataset(filename) :
     ti, tl, testi, testl = dat['train_image'], dat['train_label'], dat['test_image'], dat['test_label']
     info = dat['label_info']
 
-    label_string = " | ".join(["{}: \"{}\"".format(i,l) for i,l in enumerate(info)])
+    label_string = "\n".join(["{}: \"{}\"".format(i,l) for i,l in enumerate(info)])
 
     print("key: ")
     print(label_string)
@@ -89,13 +89,13 @@ def validate_dataset(filename) :
     print('training') 
     for i,j in zip(ti[:15],tl[:15]) :
         print("{}, {}".format(j, np.argmax(j)))
-        pp.imshow(i.reshape([28,28]), cmap='Greys')
+        pp.imshow(i, interpolation="none")
         pp.show()
 
     print('testing') 
     for i,j in zip(testi[:15],testl[:15]) :
         print("{}, {}".format(j, np.argmax(j)))
-        pp.imshow(i.reshape([28,28]), cmap='Greys')
+        pp.imshow(i, interpolation="none")
         pp.show()
 
 def make_mnist_h5py(loc) :
@@ -105,6 +105,8 @@ def make_mnist_h5py(loc) :
     mean = get_mean(train_image)
     stddev = get_stddev(train_image)
 
+    train_image, train_label = shuffle_data(train_image, train_label)
+
     cat_list = [str(l) for l in cat_list]
 
     out_train_image = dat.create_dataset('train_image', data=train_image, dtype=np.uint8)
@@ -112,8 +114,44 @@ def make_mnist_h5py(loc) :
     out_test_image = dat.create_dataset('test_image', data=test_image, dtype=np.uint8)
     out_test_label = dat.create_dataset('test_label', data=test_label, dtype=np.uint8)
     insert_strings_into_h5(cat_list, dat, name="label_info")
-    out_max = dat.create_dataset('max', data=[max], dtype=np.float64)
-    out_min = dat.create_dataset('min', data=[min], dtype=np.float64)
-    out_mean = dat.create_dataset('mean', data=[mean], dtype=np.float64)
-    out_stddev = dat.create_dataset('stddev', data=[stddev], dtype=np.float64)
+    dat.create_dataset('max', data=[max], dtype=np.float64)
+    dat.create_dataset('min', data=[min], dtype=np.float64)
+    dat.create_dataset('mean', data=[mean], dtype=np.float64)
+    dat.create_dataset('stddev', data=[stddev], dtype=np.float64)
+
+
+
+#For now this works only with h5py
+class Dataset :
+
+    def __init__(self, filename) :
+        self.dat = h5py.File(filename)
+
+    def training_len(self) :
+        return len(self.dat["train_image"])
+
+    def testing_len(self) :
+        return len(self.dat["test_image"])
+
+    def get_shape(self) :
+        return (self.dat["train_image"].shape[1:], self.dat["train_label"].shape[1:])
+
+    def get_training_data(self) :
+        return (self.dat["train_image"], self.dat["train_label"])
+
+    def get_testing_data(self) :
+        return (self.dat["test_image"], self.dat["test_label"])
+
+    #TODO add means for precomputing and caching results if they do not exist
+    def get_min(self) : 
+        return self.dat["min"][0]
+
+    def get_max(self) :
+        return self.dat["max"][0]
+
+    def get_mean(self) :
+        return self.dat["mean"][0]
+
+    def get_stddev(self) :
+        return self.dat["stddev"][0]
 
