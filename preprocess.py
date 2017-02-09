@@ -14,7 +14,7 @@ class Preprocessor :
 
         self.datapoints = len(self.data)
 
-    def _index_thread(self, epochs, session, shuffle=False) :
+    def _index_thread(self, epochs, session, shuffle) :
         print("starting indexing thread")
         for e in range(epochs) :
             print("starting epoch with {} images".format(self.datapoints))
@@ -30,8 +30,9 @@ class Preprocessor :
                     print('returning')
                     return
 
-        print('closing index queue and exiting')
-        session.run(self.prep.index_queue.close())
+        #TODO remove?
+        #print('closing index queue and exiting')
+        #session.run(self.prep.index_queue.close())
 
     def _feeder_thread(self, session) :
         print("starting feeder thread")
@@ -55,11 +56,7 @@ class Preprocessor :
         session.run(self.prep.batch_queue.close())
 
 
-    def start(self, epochs, session, feed_threads=16) :
-        t = threading.Thread(target=self._index_thread, args=(epochs, session))
-        t.daemon = True
-        self.coord.register_thread(t)
-        t.start()
+    def start(self, session, feed_threads=16) :
 
         for i in range(feed_threads) :
             t = threading.Thread(target=self._feeder_thread, args=(session,))
@@ -70,6 +67,20 @@ class Preprocessor :
         t = threading.Thread(target=self._closer_thread, args=(session,))
         t.daemon = True
         t.start()
+
+    def get_epoch_size(self) :
+        return self.datapoints
+
+    #TODO allow a range of indices to be passed in? moving part that is hard to keep track of otherwise
+    def produce(self, epochs, session, shuffle=False) :
+        t = threading.Thread(target=self._index_thread, args=(epochs, session, shuffle))
+        t.daemon = True
+        #self.coord.register_thread(t)
+        t.start()
+
+    def safe_shutdown(self, session) :
+        session.run(self.prep.index_queue.close())
+
 
 def test_preprocess() :
     import matplotlib.pyplot as pp

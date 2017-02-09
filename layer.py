@@ -85,12 +85,13 @@ class GradDescentLayer(Layer) :
     tag = "gradient_descent"
     stage = OPTIMIZER_STAGE
 
-    def __init__(self, learning_rate) :
-        self.learning_rate = learning_rate
+    def __init__(self) :
+        pass
 
     def build_layer(self,layer_util) :
         loss = layer_util.get_previous_tensor()
-        return tf.train.GradientDescentOptimizer(self.learning_rate).minimize(loss)
+        learning_rate = layer_util.get_learning_rate()
+        return tf.train.GradientDescentOptimizer(learning_rate).minimize(loss)
 
     def parameter_spec(self) :
         return (("learning_rate", self.learning_rate),)

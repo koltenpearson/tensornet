@@ -24,12 +24,13 @@ DROPOUT_NAME = "dropout"
 #
 class LayerUtil :
 
-    def __init__(self, input_tensor, label_tensor) :
+    def __init__(self, input_tensor, label_tensor, learning_rate=None) :
         self.activations = {"relu" : tf.nn.relu,"softmax" : tf.nn.softmax, "none" : lambda x:x}
         self.weight_initializer = tf.contrib.layers.xavier_initializer()
         self.bias_initializer = tf.random_normal_initializer()
         self.prev_tensor = input_tensor
         self.label_tensor = label_tensor
+        self.learning_rate=learning_rate
 
     #this method will return the last layers output
     # as a tensor
@@ -41,6 +42,12 @@ class LayerUtil :
 
     def update_latest(self, tensor) :
         self.prev_tensor = tensor
+
+    def get_learning_rate(self) :
+        if self.learning_rate is not None :
+            return self.learning_rate
+        else :
+            raise "no learning rate defined"
 
     #returns a new weight (or existing weight, if it has already been initialized)
     def get_weight(self, shape, dtype=tf.float32) :
@@ -63,7 +70,6 @@ class LayerUtil :
             result = tf.get_variable(name, shape, dtype=dtype, initializer=self.bias_initializer)
 
         return result
-
 
     #returns activation functions based off a key, used to make them serializable
     def get_activation(self, key) :
@@ -93,20 +99,26 @@ class NetSpec :
         for p in params :
             self.params[p.stage].append(p)
 
-    def create_network(self, dataset, batch_size) :
+    #max_batch_size used to create the queues
+    def create_network(self, dataset, max_batch_size=1000) :
         net = Network()
         with net.graph.as_default() :
 
-            self._setup_index_read(net.train_prep, batch_size)
-            self._setup_preprocessing(net.train_prep, dataset, batch_size, train=True)
+            batch_size = tf.placeholder(tf.int32, shape=())
+            learning_rate = tf.placeholder(tf.float32, shape=())
+            net.batch_size = batch_size
+            net.learning_rate = learning_rate
+
+            self._setup_index_read(net.train_prep, max_batch_size)
+            self._setup_preprocessing(net.train_prep, dataset, batch_size, max_batch_size, train=True)
             self._setup_network_graph(net.train, net.train_prep, train=True)
             self._setup_accuracy(net.train, net.train_prep, train=True)
             self._setup_loss(net.train, net.train_prep, train=True)
-            self._setup_optimizer(net.train, net.train_prep, train=True)
+            self._setup_optimizer(net.train, net.train_prep, learning_rate, train=True)
 
 
-            self._setup_index_read(net.eval_prep, batch_size)
-            self._setup_preprocessing(net.eval_prep, dataset, batch_size, train=False)
+            self._setup_index_read(net.eval_prep, max_batch_size)
+            self._setup_preprocessing(net.eval_prep, dataset, batch_size, max_batch_size, train=False)
             self._setup_network_graph(net.eval, net.eval_prep, train=False)
             self._setup_accuracy(net.eval, net.eval_prep, train=False)
             self._setup_loss(net.eval, net.eval_prep, train=False)
@@ -115,15 +127,16 @@ class NetSpec :
 
         return net
 
-    def _setup_index_read(self, prep, batch_size)  :
+    def _setup_index_read(self, prep, max_batch_size)  :
         with tf.variable_scope("prep") :
             prep.index = tf.placeholder(tf.int32, shape=())
-            index_queue = tf.FIFOQueue(batch_size * 5, dtypes=[tf.int32])
+            #TODO decide limits better
+            index_queue = tf.FIFOQueue(max_batch_size, dtypes=[tf.int32])
             prep.index_enqueue = index_queue.enqueue(prep.index)
             prep.index_dequeue = index_queue.dequeue()
             prep.index_queue = index_queue
 
-    def _setup_preprocessing(self, prep, dataset, batch_size, train=True) :
+    def _setup_preprocessing(self, prep, dataset, batch_size, max_batch_size, train=True) :
         with tf.variable_scope("prep") :
             image_shape, label_shape = dataset.get_shape() #TODO should I even assume these are normalized sizes coming in?
             #TODO do I need the whole dataset for this . . .
@@ -142,9 +155,9 @@ class NetSpec :
 
             ##now we build the output queues
             inp = p_util.get_previous_tensor()
-            batch_queue = tf.FIFOQueue(batch_size * 5, [tf.float32, tf.float32], [inp.get_shape().dims, prep.label_in.get_shape().dims])
+            batch_queue = tf.FIFOQueue(max_batch_size, [tf.float32, tf.float32], [inp.get_shape().dims, prep.label_in.get_shape().dims])
             prep.batch_enqueue = batch_queue.enqueue((inp, prep.label_in))
-            prep.image_out, prep.label_out = batch_queue.dequeue_up_to(batch_size)
+            prep.image_out, prep.label_out = batch_queue.dequeue_many(batch_size)
             prep.batch_queue = batch_queue
 
     def _setup_network_graph(self, net, prep, train=True) :
@@ -163,9 +176,9 @@ class NetSpec :
 
 
     def _setup_accuracy(self, net, prep, train=True) :
-        with tf.variable_scope("accuracy") :
 
-            acc = self.params[layer.ACCURACY_STAGE][0]
+        acc = self.params[layer.ACCURACY_STAGE][0]
+        with tf.variable_scope(acc.tag) :
             l_util = LayerUtil(net.final, prep.label_out)
             if train :
                 net.accuracy = acc.build_layer(l_util)
@@ -173,20 +186,21 @@ class NetSpec :
                 net.accuracy = acc.build_eval_layer(l_util)
 
     def _setup_loss(self, net, prep, train=True) :
-        with tf.variable_scope("loss") :
 
-            loss = self.params[layer.LOSS_STAGE][0]
+        loss = self.params[layer.LOSS_STAGE][0]
+        with tf.variable_scope(loss.tag) :
             l_util = LayerUtil(net.final, prep.label_out)
             if train :
                 net.loss = loss.build_layer(l_util)
             else :
                 net.loss = loss.build_eval_layer(l_util)
 
-    def _setup_optimizer(self, net, prep, train=True) :
-        with tf.variable_scope("optimizer") :
+    def _setup_optimizer(self, net, prep, learning_rate, train=True) :
 
-            opt = self.params[layer.OPTIMIZER_STAGE][0]
-            l_util = LayerUtil(net.loss, prep.label_out)
+        opt = self.params[layer.OPTIMIZER_STAGE][0]
+        with tf.variable_scope(opt.tag) :
+
+            l_util = LayerUtil(net.loss, prep.label_out,learning_rate=learning_rate)
             if train :
                 net.optimizer = opt.build_layer(l_util)
             else :

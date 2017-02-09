@@ -138,20 +138,6 @@ def start_listener(server, port, network, checkpoint) :
 
         listener.listen()
 
-def generate_runid() :
-    vowels = ['a', 'e', 'i', 'o', 'u']
-    consonants = ['b', 'd', 'k', 'f', 'h', 'j', 'k', 'l' 'm', 'n', 'p', 'r', 's', 't', 'v', 'w', 'x', 'z', 'st', 'ch', 'sh'] 
-    lengths = [1, 2, 3]
-
-    l = random.choice(lengths) 
-    result = random.choice(consonants)
-    for i in range(l) :
-        result += random.choice(vowels)
-        result += random.choice(consonants)
-
-    return result
-    
-
 def main() :
     args = sys.argv[1:]
 
