@@ -39,6 +39,9 @@ class Shoot :
         jdict["stems"] = [s.to_json_dict() for s in self.stems]
         return jdict
 
+    def add_stem(self, st) :
+        self.stems.append(st)
+
 
 class Stem :
     ROOT = "ROOT"
@@ -66,27 +69,47 @@ class Stem :
 
 class Tree :
 
+
+    class stack_block(self) :
+
+        def __init__(self, stem, shoot) :
+            self.stem = stem
+            self.shoot = shoot
+
+        def get_stem_name(self) :
+            return self.stem.name
+
+        def get_shoot_name :
+            if self.shoot is not None :
+                return self.shoot.name
+            else :
+                return None
+
+    def _make_stack(self, target_stem, target_shoot) :
+        stack = []
+        self._make_stack_helper(target_stem, target_shoot, self.ROOT, stack)
+        stack.reverse()
+        return stack
+
+
     #NOTE: stem names alone must be unique, branchnames unique to their stem
-    def _make_stack(self, target_stem, target_shoot, location, stack) :
+    def _make_stack_helper(self, target_stem, target_shoot, location, stack) :
         if location.name == target_stem :
             selected_shoot = None
             for s in location.shoots :
                 if s.name == target_shoot :
                     selected_shoot = s
-            stack.append(selected_shoot)
-            stack.append(location)
+            stack.append(stack_block(location, selected_shoot))
             return True
 
         #TODO make better, (easier to follow)
         for shoot in location.shoots :
             for stem in shoots.stems :
                 if _make_stack(target_stem, target_shoot, location, stack) :
-                    stack.append((location, shoot))
+                    stack.append(stack_block(location, shoot))
                     return True
 
         return False
-
-
 
     #init_net should be a netspec
     def __init__(self, name, base) :
@@ -102,8 +125,7 @@ class Tree :
             self._initialize_dirs()
             self.root = Stem(Stem.ROOT)
             self.unique_list = {Node.ROOT}
-            self.current_stem = self.root
-            self.current_shoot = None
+            self.stack = [stack_block(self.root, None)]
             self._save_meta_file()
 
     def _initialize_dirs(self) :
@@ -116,12 +138,18 @@ class Tree :
         jdict = {}
         jdict["root"] = self.root.to_json_dict()
         jdict["unique_list"] = list(self.unique_list)
+        jdict["current_stem"] = self.stack[-1].get_stem_name()
+        jdict["current_shoot"] = self.stack[-1].get_shoot_name()
+
         json.dump(jdict, open(self.meta_file, 'w'))
 
     def self._load_meta_file(self) :
         jdict = json.load(open(self.meta_file))
         self.root = Node.from_json_dict(jdict["root"])
         self.unique_list = set(jdict["unique_list"])
+        tstem = jdict["current_stem"]
+        tshoot = jdict["current_shoot"]
+        self.stack = self._make_stack(tstem, tshoot)
 
 
     def _generate_runid() :
@@ -137,6 +165,23 @@ class Tree :
 
         return result
     
+
+    #adds stem to current shoot at this spot
+    #TODO gaurentee uniquness using number of iterations
+    def new_stem(self) :
+        if stem_name in unique_list :
+            return False
+
+        #add to internal data structures
+        unique_list.add(stem_name)
+        stem = Stem(stem_name)
+        self.stack[-1].shoot.append(stem_name)
+
+        
+        os.makedirs(os.path.join(self.ref_dir, stem_name))
+
+
+
 class Run :
 
     def __init__(self, netspec, dataset, learning_rate, batch_size) : #XXX subject to change, this is just to get us off the ground
