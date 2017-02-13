@@ -2,184 +2,70 @@ import tensorflow as tf
 import math
 import os
 import json
+import datetime
+import time
 
 from network import NetSpec
 from preprocess import Preprocessor
 from layer import *
 from data_proc import Dataset
+#TODO make some way of keeping track of a group of runs
 #TODO make so it import correctly within package
 
 
-REF_DIR = "refs"
-BRANCH_DIR = "branch"
-LOG_DIR = "log"
-META_FILE = "tree.json"
+ARCHIVE_DIR = ".archive"
+DATASET_DIR = "dataset"
+LOG_FILE = ".log.json"
 
-class Shoot :
+class Log :
+
+    @classmethod
+    def make_new(name, parent_name, init_entry) :
+        l = Log()
+        l.name = name
+        l.parent_name = parent_name
+        l.entries = []
+        l.entries.append((time.time(), init_entry))
+        return e
+
+    def add_entry(self, entry) :
+        self.entries.append((time.time(), init_entry))
+        return len(self.entries)
 
     @classmethod
     def from_json_dict(self, jdict) :
-        name = jdict["name"]
-        stems = [Stem.from_json_dict(c) for c in jdict["stems"]]
-        result = Shoot(name, stems=stems)
-        return result
+        l = Log()
+        l.name = jdict["name"]
+        l.parent_name = jdict['parent_name']
+        l.entries = jdict['entries']
+        return l
 
-    ##name is a string, referring to a file on disk
-    # stems is a list of stem objects in correct order (for deserialization purposes)
-    def __init__(self, name, stems=None) :
-        self.name = name
-        self.stems = stems
-
-        if self.stems is None :
-            self.stems = []
-
-    def to_json_dict(self) :
+    def to_json_dict(self):
         jdict = {}
-        jdict["name"] = self.name
-        jdict["stems"] = [s.to_json_dict() for s in self.stems]
-        return jdict
-
-    def add_stem(self, st) :
-        self.stems.append(st)
-
-
-class Stem :
-    ROOT = "ROOT"
-
-    @classmethod
-    def from_json_dict(self, jdict) :
-        name = jdict["name"]
-        shoots = [Shoot.from_json_dict(c) for c in jdict["shoots"]]
-        result = Stem(name, stems=stems)
-        return result
-
-    ##name is a string, referring to a file on disk
-    def __init__(self, name, shoots=None) :
-        self.name = name
-
-        if self.shoots is None :
-            self.shoots = []
-
-    def to_json_dict(self) :
-        jdict = {}
-        jdict["name"] = self.name
-        jdict["shoots"] = [s.to_json_dict() for s in self.shoots]
+        jdict['name'] = name
+        jdict['parent_name'] = parent_name
+        jdict['entries'] = entries
         return jdict
 
 
-class Tree :
+class Log_Book :
 
+    def __init__(self, base_dir) :
+        self.base_dir = base_dir
 
-    class stack_block(self) :
+        self.logs = {}
 
-        def __init__(self, stem, shoot) :
-            self.stem = stem
-            self.shoot = shoot
-
-        def get_stem_name(self) :
-            return self.stem.name
-
-        def get_shoot_name :
-            if self.shoot is not None :
-                return self.shoot.name
-            else :
-                return None
-
-    def _make_stack(self, target_stem, target_shoot) :
-        stack = []
-        self._make_stack_helper(target_stem, target_shoot, self.ROOT, stack)
-        stack.reverse()
-        return stack
-
-
-    #NOTE: stem names alone must be unique, branchnames unique to their stem
-    def _make_stack_helper(self, target_stem, target_shoot, location, stack) :
-        if location.name == target_stem :
-            selected_shoot = None
-            for s in location.shoots :
-                if s.name == target_shoot :
-                    selected_shoot = s
-            stack.append(stack_block(location, selected_shoot))
-            return True
-
-        #TODO make better, (easier to follow)
-        for shoot in location.shoots :
-            for stem in shoots.stems :
-                if _make_stack(target_stem, target_shoot, location, stack) :
-                    stack.append(stack_block(location, shoot))
-                    return True
-
-        return False
-
-    #init_net should be a netspec
-    def __init__(self, name, base) :
-        self.name = name
-        self.base_dir = base
-        self.ref_dir = os.path.join(base, REF_DIR)
-        self.branch_dir = os.path.join(base, BRANCH_DIR)
-        self.log_dir = os.path.join(base, LOG_DIR)
-        self.meta_file = os.path.join(self.base_dir, META_FILE)
-        if (os.path.exists(self.meta_file)) :
-            self._load_meta_file()
-        else :
-            self._initialize_dirs()
-            self.root = Stem(Stem.ROOT)
-            self.unique_list = {Node.ROOT}
-            self.stack = [stack_block(self.root, None)]
-            self._save_meta_file()
-
-    def _initialize_dirs(self) :
-        #TODO use class member refs, (get rid of repeated code)
-        os.makedirs(os.path.join(self.base_dir, REF_DIR), exist_ok=True)
-        os.makedirs(os.path.join(self.base_dir, BRANCH_DIR), exist_ok=True)
-        os.makedirs(os.path.join(self.base_dir, LOG_DIR), exist_ok=True)
-
-    def self._save_meta_file(self) :
-        jdict = {}
-        jdict["root"] = self.root.to_json_dict()
-        jdict["unique_list"] = list(self.unique_list)
-        jdict["current_stem"] = self.stack[-1].get_stem_name()
-        jdict["current_shoot"] = self.stack[-1].get_shoot_name()
-
-        json.dump(jdict, open(self.meta_file, 'w'))
-
-    def self._load_meta_file(self) :
-        jdict = json.load(open(self.meta_file))
-        self.root = Node.from_json_dict(jdict["root"])
-        self.unique_list = set(jdict["unique_list"])
-        tstem = jdict["current_stem"]
-        tshoot = jdict["current_shoot"]
-        self.stack = self._make_stack(tstem, tshoot)
-
-
-    def _generate_runid() :
-        vowels = ['a', 'e', 'i', 'o', 'u']
-        consonants = ['b', 'd', 'k', 'f', 'h', 'j', 'k', 'l' 'm', 'n', 'p', 'r', 's', 't', 'v', 'w', 'x', 'z', 'st', 'ch', 'sh'] 
-        lengths = [1, 2, 3]
-
-        l = random.choice(lengths) 
-        result = random.choice(consonants)
-        for i in range(l) :
-            result += random.choice(vowels)
-            result += random.choice(consonants)
-
-        return result
+    def check_name_valid(self, name) :
+        return (not name in self.logs)
     
+    def add_log(self, name) :
+        if (not check_name_valid(name)) :
+            raise Error("name not valid, already in use")
 
-    #adds stem to current shoot at this spot
-    #TODO gaurentee uniquness using number of iterations
-    def new_stem(self) :
-        if stem_name in unique_list :
-            return False
+        self.logs[name] = Log()
 
-        #add to internal data structures
-        unique_list.add(stem_name)
-        stem = Stem(stem_name)
-        self.stack[-1].shoot.append(stem_name)
-
-        
-        os.makedirs(os.path.join(self.ref_dir, stem_name))
-
+    def add_entry(self, log_name,entry) :
+        return self.logs[name].add_entry(entry)
 
 
 class Run :
